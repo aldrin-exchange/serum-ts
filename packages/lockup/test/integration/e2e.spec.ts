@@ -6,13 +6,15 @@ import {
   sleep,
   createMintAndVault,
   createTokenAccount,
+  networks,
 } from '@project-serum/common';
-import { Client, networks } from '../../src';
+import { Client } from '../../src';
 import { WhitelistEntry } from '../../src/accounts/whitelist';
 
 // When running this test, make sure to deploy the program and plugin the address.
-const programId = networks.devnet.programId;
-const url = networks.devnet.url;
+const network = networks.localhost;
+const programId = network.lockupProgramId;
+const url = network.url;
 
 const i64Zero = new BN(Buffer.alloc(8)).toTwos(64);
 const u64Zero = new BN(Buffer.alloc(8));
@@ -29,13 +31,11 @@ describe('End-to-end tests', () => {
       provider,
       new BN(1000000000),
     );
-
     // Initialize the safe.
     const [client, { safe }] = await Client.initialize(provider, {
       programId,
       mint: srmMint,
     });
-
     // Whitelist add.
     let entry = await generateWhitelistEntry();
     await client.whitelistAdd({
@@ -73,12 +73,10 @@ describe('End-to-end tests', () => {
       endTs,
       periodCount,
       depositAmount,
-      needsAssignment: null,
       depositor: god,
     });
     let vestingAcc = await client.accounts.vesting(vesting);
     expect(vestingAcc.initialized).toEqual(true);
-    expect(vestingAcc.needsAssignment).toEqual(null);
     expect(vestingAcc.claimed).toEqual(false);
     expect(vestingAcc.beneficiary).toEqual(provider.wallet.publicKey);
     expect(vestingAcc.balance.toNumber()).toEqual(depositAmount.toNumber());

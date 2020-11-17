@@ -1,4 +1,5 @@
 import BN from 'bn.js';
+import * as bs58 from 'bs58';
 import {
   TransactionSignature,
   Account,
@@ -12,17 +13,21 @@ import {
   SYSVAR_RENT_PUBKEY,
   SYSVAR_CLOCK_PUBKEY,
 } from '@solana/web3.js';
-import { AccountInfo } from '@solana/spl-token';
+import { AccountInfo, MintInfo } from '@solana/spl-token';
 import { TOKEN_PROGRAM_ID } from '@project-serum/serum/lib/token-instructions';
 import {
+  createTokenAccountInstrs,
   createMint,
   createTokenAccount,
   getTokenAccount,
+  getMintInfo,
   createAccountRentExempt,
   SPL_SHARED_MEMORY_ID,
   Provider,
   Wallet,
   NodeWallet,
+  ProgramAccount,
+  networks,
 } from '@project-serum/common';
 import {
   encodePoolState,
@@ -42,34 +47,25 @@ import {
 import { PendingWithdrawal } from './accounts/pending-withdrawal';
 import { Entity } from './accounts/entity';
 import { Member } from './accounts/member';
-import { Generation } from './accounts/generation';
-
-export const networks = {
-  devnet: {
-    url: 'https://devnet.solana.com',
-    programId: new PublicKey('HM7psK4cwnn7DXmzhRPbABB9vcA5UR4jLgBwGx98Ntqj'),
-    stakeProgramId: new PublicKey(
-      'FFXx3NM8fXxa4TainZ5o26xrzLuoZQCMZ238cyQGmX8H',
-    ),
-    registrar: new PublicKey('AraER5NbsTzDQV2h6gGz3b7WHfYAejQQbKdn9aSHaqKi'),
-    srm: new PublicKey('2gsgrFTjFsckJiPifzkHP3tznMuqVbh5TTUcVd3iMVQx'),
-    msrm: new PublicKey('4gq1S2B4yheTmvy61oArkBqZx7iCid6pvYbn242epFCk'),
-    god: new PublicKey('9PRbiYDXcFig3C6cu7VBFuypqbaPfqdq8knY85AgvrKw'),
-    megaGod: new PublicKey('dMyk9X7KjyHFAhdDNyEad9k2SaUMQ8Yy42CjMxZfi4V'),
-  },
-};
+import * as metaEntity from './meta-entity';
+import EventEmitter from 'eventemitter3';
 
 type Config = {
   provider: Provider;
   programId: PublicKey;
   stakeProgramId: PublicKey;
+  metaEntityProgramId: PublicKey;
   registrar: PublicKey;
 };
 
 export default class Client {
+  static _retbuf: PublicKey | null = null;
+  static _retbufProgramId: PublicKey | null = null;
+
   readonly provider: Provider;
   readonly programId: PublicKey;
   readonly stakeProgramId: PublicKey;
+  readonly metaEntityProgramId: PublicKey;
   readonly accounts: Accounts;
   readonly registrar: PublicKey;
 
@@ -77,8 +73,23 @@ export default class Client {
     this.provider = cfg.provider;
     this.programId = cfg.programId;
     this.stakeProgramId = cfg.stakeProgramId;
-    this.accounts = new Accounts(cfg.provider, cfg.registrar);
+    this.metaEntityProgramId = cfg.metaEntityProgramId;
+    this.accounts = new Accounts(
+      cfg.provider,
+      cfg.registrar,
+      cfg.programId,
+      cfg.metaEntityProgramId,
+    );
     this.registrar = cfg.registrar;
+  }
+
+  // Use this to cache a retbuf account, so that we don't have to allocate
+  // one everytime we need it.
+  static setRetbuf(retbuf: PublicKey, retbufProgramId?: PublicKey): void {
+    Client._retbuf = retbuf;
+    if (retbufProgramId !== undefined) {
+      Client._retbufProgramId = retbufProgramId;
+    }
   }
 
   // Connects to the devnet deployment of the program.
@@ -94,9 +105,10 @@ export default class Client {
     const provider = new Provider(connection, wallet, opts);
     return new Client({
       provider,
-      programId: networks.devnet.programId,
+      programId: networks.devnet.registryProgramId,
       stakeProgramId: networks.devnet.stakeProgramId,
       registrar: networks.devnet.registrar,
+      metaEntityProgramId: networks.devnet.metaEntityProgramId,
     });
   }
 
@@ -108,6 +120,7 @@ export default class Client {
     let {
       programId,
       stakeProgramId,
+      metaEntityProgramId,
       mint,
       megaMint,
       withdrawalTimelock,
@@ -274,6 +287,7 @@ export default class Client {
       provider,
       programId,
       stakeProgramId,
+      metaEntityProgramId,
     });
 
     return [
@@ -332,16 +346,31 @@ export default class Client {
       tx: txSig,
     };
   }
-  // 800 922 0204
+
   async createEntity(req: CreateEntityRequest): Promise<CreateEntityResponse> {
-    let { leader } = req;
+    let { leader, name, about, imageUrl } = req;
     const leaderPubkey =
       leader === undefined ? this.provider.wallet.publicKey : leader.publicKey;
 
+    const metadataAccount = new Account();
+    const mqueue = new Account();
     const entity = new Account();
+
+    const metadataInstrs = await metaEntity.transaction.initializeInstrs({
+      mqueue,
+      programId: this.metaEntityProgramId,
+      authority: leaderPubkey,
+      name,
+      about,
+      provider: this.provider,
+      metadataAccount,
+      imageUrl,
+      entity: entity.publicKey,
+    });
 
     const tx = new Transaction();
     tx.add(
+      ...metadataInstrs,
       SystemProgram.createAccount({
         fromPubkey: this.provider.wallet.publicKey,
         newAccountPubkey: entity.publicKey,
@@ -362,17 +391,20 @@ export default class Client {
         ],
         programId: this.programId,
         data: instruction.encode({
-          createEntity: {},
+          createEntity: {
+            metadata: metadataAccount.publicKey,
+          },
         }),
       }),
     );
 
-    let signers = [entity, leader];
+    let signers = [metadataAccount, mqueue, entity, leader];
     let txSig = await this.provider.send(tx, signers);
 
     return {
       tx: txSig,
       entity: entity.publicKey,
+      metadata: metadataAccount.publicKey,
     };
   }
 
@@ -408,7 +440,14 @@ export default class Client {
   }
 
   async createMember(req: CreateMemberRequest): Promise<CreateMemberResponse> {
-    let { beneficiary, entity, delegate } = req;
+    let {
+      beneficiary,
+      entity,
+      delegate,
+      poolTokenMint,
+      megaPoolTokenMint,
+      registrar,
+    } = req;
 
     const beneficiaryPubkey =
       beneficiary === undefined
@@ -418,11 +457,37 @@ export default class Client {
     if (delegate === undefined) {
       delegate = new PublicKey(Buffer.alloc(32));
     }
+    if (poolTokenMint === undefined) {
+      const pool = await this.accounts.pool(this.registrar);
+      poolTokenMint = pool.poolTokenMint;
+    }
+    if (megaPoolTokenMint === undefined) {
+      const megaPool = await this.accounts.megaPool(this.registrar);
+      megaPoolTokenMint = megaPool.poolTokenMint;
+    }
 
     const member = new Account();
-    const [_, nonce] = await PublicKey.findProgramAddress(
-      [member.publicKey.toBuffer(), beneficiaryPubkey.toBuffer()],
+
+    const registrySigner = await this.accounts.vaultAuthority(
       this.programId,
+      this.registrar,
+      registrar,
+    );
+
+    const spt = new Account();
+    const sptMega = new Account();
+
+    const createSptInstrs = await createTokenAccountInstrs(
+      this.provider,
+      spt.publicKey,
+      poolTokenMint,
+      registrySigner,
+    );
+    const createMsptInstrs = await createTokenAccountInstrs(
+      this.provider,
+      sptMega.publicKey,
+      megaPoolTokenMint,
+      registrySigner,
     );
 
     const tx = new Transaction();
@@ -439,31 +504,38 @@ export default class Client {
     );
 
     tx.add(
+      ...createSptInstrs,
+      ...createMsptInstrs,
       new TransactionInstruction({
         keys: [
           { pubkey: beneficiaryPubkey, isWritable: false, isSigner: true },
           { pubkey: member.publicKey, isWritable: true, isSigner: false },
           { pubkey: entity, isWritable: true, isSigner: false },
           { pubkey: this.registrar, isWritable: false, isSigner: false },
+          { pubkey: registrySigner, isWritable: false, isSigner: false },
+          { pubkey: spt.publicKey, isWritable: false, isSigner: false },
+          { pubkey: sptMega.publicKey, isWritable: false, isSigner: false },
+          { pubkey: TOKEN_PROGRAM_ID, isWritable: false, isSigner: false },
           { pubkey: SYSVAR_RENT_PUBKEY, isWritable: false, isSigner: false },
         ],
         programId: this.programId,
         data: instruction.encode({
           createMember: {
             delegate: delegate,
-            nonce,
           },
         }),
       }),
     );
 
-    let signers = [member, beneficiary];
+    let signers = [spt, sptMega, member, beneficiary];
 
     let txSig = await this.provider.send(tx, signers);
 
     return {
       tx: txSig,
       member: member.publicKey,
+      spt: spt.publicKey,
+      sptMega: sptMega.publicKey,
     };
   }
 
@@ -521,7 +593,7 @@ export default class Client {
           { pubkey: entity, isWritable: true, isSigner: false },
           { pubkey: newEntity, isWritable: true, isSigner: false },
           { pubkey: SYSVAR_CLOCK_PUBKEY, isWritable: false, isSigner: false },
-        ],
+        ].concat(await this.poolAccounts()),
         programId: this.programId,
         data: instruction.encode({
           switchEntity: {},
@@ -662,14 +734,16 @@ export default class Client {
       depositorAuthority,
       amount,
       vault,
+      vaultOwner,
     } = req;
     if (entity === undefined) {
       let m = await this.accounts.member(member);
       entity = m.entity;
     }
-    let v = await this.vaultFor(depositor);
-    if (vault === undefined) {
+    if (vault === undefined || vaultOwner === undefined) {
+      let v = await this.vaultFor(depositor);
       vault = v.vaultAddress;
+      vaultOwner = v.vault.owner;
     }
 
     const beneficiaryPubkey =
@@ -693,14 +767,14 @@ export default class Client {
             isSigner: true,
           },
           { pubkey: TOKEN_PROGRAM_ID, isWritable: false, isSigner: false },
-          { pubkey: v.vault.owner, isWritable: true, isSigner: false },
+          { pubkey: vaultOwner, isWritable: true, isSigner: false },
           // Program specific.
           { pubkey: member, isWritable: true, isSigner: false },
           { pubkey: beneficiaryPubkey, isWritable: false, isSigner: true },
           { pubkey: entity, isWritable: true, isSigner: false },
           { pubkey: this.registrar, isWritable: false, isSigner: false },
           { pubkey: SYSVAR_CLOCK_PUBKEY, isWritable: false, isSigner: false },
-          { pubkey: v.vault.owner, isWritable: true, isSigner: false },
+          { pubkey: vault, isWritable: true, isSigner: false },
         ].concat(await this.poolAccounts()),
         programId: this.programId,
         data: instruction.encode({
@@ -720,7 +794,7 @@ export default class Client {
   }
 
   async stake(req: StakeRequest): Promise<StakeResponse> {
-    let { member, beneficiary, entity, amount, stakeToken } = req;
+    let { member, beneficiary, entity, amount, spt } = req;
 
     const beneficiaryPubkey =
       beneficiary === undefined
@@ -742,7 +816,7 @@ export default class Client {
           { pubkey: this.registrar, isWritable: false, isSigner: false },
           { pubkey: SYSVAR_CLOCK_PUBKEY, isWritable: false, isSigner: false },
           { pubkey: TOKEN_PROGRAM_ID, isWritable: false, isSigner: false },
-        ].concat(await this.executePoolAccounts(stakeToken)),
+        ].concat(await this.executePoolAccounts(spt)),
         programId: this.programId,
         data: instruction.encode({
           stake: {
@@ -792,22 +866,36 @@ export default class Client {
       .concat([{ pubkey: vaultAuthority, isWritable: false, isSigner: false }]);
   }
 
-  private async poolAccounts(r?: Registrar): Promise<Array<AccountMeta>> {
+  private async poolAccounts(
+    r?: Registrar,
+    retbuf?: PublicKey,
+    retbufProgramId?: PublicKey,
+  ): Promise<Array<AccountMeta>> {
     if (r === undefined) {
       r = await this.accounts.registrar(this.registrar);
     }
     let pool = await this.accounts.pool(r);
     let megaPool = await this.accounts.megaPool(r);
-    let retbuf = await createAccountRentExempt(
-      this.provider,
-      SPL_SHARED_MEMORY_ID,
-      MAX_BASKET_SIZE,
-    );
+
+    if (retbuf === undefined) {
+      if (Client._retbuf === null) {
+        throw new Error('Retbuf not provided');
+      }
+      retbuf = Client._retbuf;
+    }
+    if (retbufProgramId === undefined) {
+      if (Client._retbufProgramId !== null) {
+        retbufProgramId = Client._retbufProgramId;
+      } else {
+        retbufProgramId = SPL_SHARED_MEMORY_ID;
+      }
+    }
+
     return [
       // Pids.
       { pubkey: this.stakeProgramId, isWritable: false, isSigner: false },
-      { pubkey: SPL_SHARED_MEMORY_ID, isWritable: false, isSigner: false },
-      { pubkey: retbuf.publicKey, isWritable: true, isSigner: false },
+      { pubkey: retbufProgramId, isWritable: false, isSigner: false },
+      { pubkey: retbuf, isWritable: true, isSigner: false },
       // Pool.
       { pubkey: r.pool, isWritable: true, isSigner: false },
       { pubkey: pool.poolTokenMint, isWritable: true, isSigner: false },
@@ -880,8 +968,9 @@ export default class Client {
       beneficiary,
       entity,
       amount,
-      stakeToken,
+      spt,
       generation,
+      registrar,
     } = req;
 
     const beneficiaryPubkey =
@@ -900,6 +989,7 @@ export default class Client {
     let vaultAuthority = await this.accounts.vaultAuthority(
       this.programId,
       this.registrar,
+      registrar,
     );
 
     const tx = new Transaction();
@@ -931,7 +1021,7 @@ export default class Client {
           { pubkey: SYSVAR_CLOCK_PUBKEY, isWritable: false, isSigner: false },
           { pubkey: SYSVAR_RENT_PUBKEY, isWritable: false, isSigner: false },
         ]
-          .concat(await this.executePoolAccounts(stakeToken))
+          .concat(await this.executePoolAccounts(spt))
           .concat(
             generation === undefined
               ? []
@@ -1000,32 +1090,42 @@ export default class Client {
     };
   }
 
-  // Allocates a staking pool token. Note that the token doesn't belong to
-  // the user until `stake` has been called, at which point the Registry will
-  // mint a balance to the token account and set the delegate to be the
-  // beneficiary.
-  async allocSpt(isMega: boolean): Promise<PublicKey> {
-    const owner = await this.accounts.vaultAuthority(
-      this.programId,
-      this.registrar,
-    );
-    let pool = isMega
-      ? await this.accounts.megaPool(this.registrar)
-      : await this.accounts.pool(this.registrar);
-    let spt = await createTokenAccount(
-      this.provider,
-      pool.poolTokenMint,
-      owner,
+  async sendMessage(req: SendMessageRequest): Promise<SendMessageResponse> {
+    const { from, ts, content, mqueue } = req;
+    let data = metaEntity.accounts.mqueue.encode({
+      from,
+      ts,
+      content,
+    });
+    const tx = new Transaction();
+    tx.add(
+      new TransactionInstruction({
+        keys: [{ pubkey: mqueue, isWritable: true, isSigner: false }],
+        programId: this.metaEntityProgramId,
+        data: metaEntity.instruction.encode({
+          sendMessage: {
+            data,
+          },
+        }),
+      }),
     );
 
-    return spt;
+    let signers: any = [];
+    let txSig = await this.provider.send(tx, signers);
+
+    return {
+      tx: txSig,
+    };
   }
 }
 
 class Accounts {
+  private _subscriptionId = -1;
   constructor(
     readonly provider: Provider,
     readonly registrarAddress: PublicKey,
+    readonly programId: PublicKey,
+    readonly metaEntityProgramId: PublicKey,
   ) {}
 
   async registrar(address?: PublicKey): Promise<Registrar> {
@@ -1045,6 +1145,16 @@ class Accounts {
       throw new Error(`Entity does not exist ${address}`);
     }
     return accounts.entity.decode(accountInfo.data);
+  }
+
+  async metadata(
+    address: PublicKey,
+  ): Promise<metaEntity.accounts.metadata.Metadata> {
+    const accountInfo = await this.provider.connection.getAccountInfo(address);
+    if (accountInfo === null) {
+      throw new Error(`Entity does not exist ${address}`);
+    }
+    return metaEntity.accounts.metadata.decode(accountInfo.data);
   }
 
   async member(address: PublicKey): Promise<Member> {
@@ -1084,6 +1194,16 @@ class Accounts {
     return decodePoolState(acc.data);
   }
 
+  async poolTokenMint(
+    pool?: PoolState,
+    registrar?: Registrar,
+  ): Promise<MintInfo> {
+    if (pool === undefined) {
+      pool = await this.pool(registrar || this.registrarAddress);
+    }
+    return await getMintInfo(this.provider, pool.poolTokenMint);
+  }
+
   async poolVault(registrar: PublicKey | Registrar): Promise<AccountInfo> {
     const p = await this.pool(registrar);
     return getTokenAccount(this.provider, p.assets[0].vaultAddress);
@@ -1092,7 +1212,7 @@ class Accounts {
   async megaPoolVaults(
     registrar: PublicKey | Registrar,
   ): Promise<[AccountInfo, AccountInfo]> {
-    const p = await this.pool(registrar);
+    const p = await this.megaPool(registrar);
     return Promise.all([
       getTokenAccount(this.provider, p.assets[0].vaultAddress),
       getTokenAccount(this.provider, p.assets[1].vaultAddress),
@@ -1110,6 +1230,16 @@ class Accounts {
     return decodePoolState(acc.data);
   }
 
+  async megaPoolTokenMint(
+    pool?: PoolState,
+    registrar?: Registrar,
+  ): Promise<MintInfo> {
+    if (pool === undefined) {
+      pool = await this.megaPool(registrar || this.registrarAddress);
+    }
+    return await getMintInfo(this.provider, pool.poolTokenMint);
+  }
+
   async vaultAuthority(
     programId: PublicKey,
     registrarAddr: PublicKey,
@@ -1123,11 +1253,306 @@ class Accounts {
       programId,
     );
   }
+
+  async allEntities(): Promise<ProgramAccount<Entity>[]> {
+    const entityBytes = accounts.entity
+      .encode({
+        ...accounts.entity.defaultEntity(),
+        initialized: true,
+        registrar: this.registrarAddress,
+      })
+      .slice(0, 33);
+    let filters = [
+      {
+        memcmp: {
+          offset: 0,
+          bytes: bs58.encode(entityBytes),
+        },
+      },
+      {
+        dataSize: accounts.entity.SIZE,
+      },
+    ];
+
+    // @ts-ignore
+    let resp = await this.provider.connection._rpcRequest(
+      'getProgramAccounts',
+      [
+        this.programId.toBase58(),
+        {
+          commitment: this.provider.connection.commitment,
+          filters,
+        },
+      ],
+    );
+    if (resp.error) {
+      throw new Error('failed to get entity accounts');
+    }
+    return (
+      resp.result
+        // @ts-ignore
+        .map(({ pubkey, account: { data } }) => {
+          data = bs58.decode(data);
+          return {
+            publicKey: new PublicKey(pubkey),
+            account: accounts.entity.decode(data),
+          };
+        })
+    );
+  }
+
+  async membersWithBeneficiary(
+    publicKey: PublicKey,
+  ): Promise<ProgramAccount<Member>[]> {
+    const memberBytes = accounts.member
+      .encode({
+        ...accounts.member.defaultMember(),
+        initialized: true,
+        registrar: this.registrarAddress,
+        beneficiary: publicKey,
+      })
+      .slice(0, 65);
+    let filters = [
+      {
+        memcmp: {
+          offset: 0,
+          bytes: bs58.encode(memberBytes),
+        },
+      },
+      {
+        dataSize: accounts.member.SIZE,
+      },
+    ];
+
+    // @ts-ignore
+    let resp = await this.provider.connection._rpcRequest(
+      'getProgramAccounts',
+      [
+        this.programId.toBase58(),
+        {
+          commitment: this.provider.connection.commitment,
+          filters,
+        },
+      ],
+    );
+    if (resp.error) {
+      throw new Error(
+        'failed to get member accounts owned by ' +
+          publicKey.toBase58() +
+          ': ' +
+          resp.error.message,
+      );
+    }
+
+    return (
+      resp.result
+        // @ts-ignore
+        .map(({ pubkey, account: { data } }) => {
+          data = bs58.decode(data);
+          return {
+            publicKey: new PublicKey(pubkey),
+            account: accounts.member.decode(data),
+          };
+        })
+    );
+  }
+
+  async pendingWithdrawalsForMember(
+    member: PublicKey,
+  ): Promise<ProgramAccount<PendingWithdrawal>[]> {
+    const pendingWithdrawalBytes = accounts.pendingWithdrawal
+      .encode({
+        ...accounts.pendingWithdrawal.defaultPendingWithdrawal(),
+        initialized: true,
+        member,
+      })
+      .slice(0, 33);
+    let filters = [
+      {
+        memcmp: {
+          offset: 0,
+          bytes: bs58.encode(pendingWithdrawalBytes),
+        },
+      },
+      {
+        dataSize: accounts.pendingWithdrawal.SIZE,
+      },
+    ];
+
+    // @ts-ignore
+    let resp = await this.provider.connection._rpcRequest(
+      'getProgramAccounts',
+      [
+        this.programId.toBase58(),
+        {
+          commitment: this.provider.connection.commitment,
+          filters,
+        },
+      ],
+    );
+    if (resp.error) {
+      throw new Error(
+        'failed to get pending withdrawals for ' +
+          member.toBase58() +
+          ': ' +
+          resp.error.message,
+      );
+    }
+
+    return (
+      resp.result
+        // @ts-ignore
+        .map(({ pubkey, account: { data } }) => {
+          data = bs58.decode(data);
+          return {
+            publicKey: new PublicKey(pubkey),
+            account: accounts.pendingWithdrawal.decode(data),
+          };
+        })
+    );
+  }
+
+  async generationsForEntity(
+    entity: PublicKey,
+  ): Promise<ProgramAccount<PendingWithdrawal>[]> {
+    const pendingWithdrawalBytes = accounts.generation
+      .encode({
+        ...accounts.generation.defaultGeneration(),
+        initialized: true,
+        entity,
+      })
+      .slice(0, 33);
+    let filters = [
+      {
+        memcmp: {
+          offset: 0,
+          bytes: bs58.encode(pendingWithdrawalBytes),
+        },
+      },
+      {
+        dataSize: accounts.member.SIZE,
+      },
+    ];
+
+    // @ts-ignore
+    let resp = await this.provider.connection._rpcRequest(
+      'getProgramAccounts',
+      [
+        this.programId.toBase58(),
+        {
+          commitment: this.provider.connection.commitment,
+          filters,
+        },
+      ],
+    );
+    if (resp.error) {
+      throw new Error(
+        'failed to get generations for ' +
+          entity.toBase58() +
+          ': ' +
+          resp.error.message,
+      );
+    }
+
+    return (
+      resp.result
+        // @ts-ignore
+        .map(({ pubkey, account: { data } }) => {
+          data = bs58.decode(data);
+          return {
+            publicKey: new PublicKey(pubkey),
+            account: accounts.generation.decode(data),
+          };
+        })
+    );
+  }
+
+  async allMetadata(): Promise<
+    ProgramAccount<metaEntity.accounts.metadata.Metadata>[]
+  > {
+    const metadataBytes = metaEntity.accounts.metadata
+      .encode({
+        ...metaEntity.accounts.metadata.defaultMetadata(),
+        initialized: true,
+      })
+      .slice(0, 1);
+    // @ts-ignore
+    let resp = await this.provider.connection._rpcRequest(
+      'getProgramAccounts',
+      [
+        this.metaEntityProgramId.toBase58(),
+        {
+          commitment: this.provider.connection.commitment,
+          filters: [
+            {
+              memcmp: {
+                offset: 0,
+                bytes: bs58.encode(metadataBytes),
+              },
+            },
+            {
+              dataSize: metaEntity.accounts.metadata.SIZE,
+            },
+          ],
+        },
+      ],
+    );
+    if (resp.error) {
+      throw new Error('failed to get metadata accounts');
+    }
+    return (
+      resp.result
+        // @ts-ignore
+        .map(({ pubkey, account: { data } }) => {
+          data = bs58.decode(data);
+          return {
+            publicKey: new PublicKey(pubkey),
+            account: metaEntity.accounts.metadata.decode(data),
+          };
+        })
+    );
+  }
+
+  mqueueConnect(address: PublicKey): EventEmitter {
+    const ee = new EventEmitter();
+
+    let mqueue = null;
+
+    this.provider.connection.onAccountChange(
+      address,
+      acc => {
+        // todo: emit message by message instead of the entire queue.
+        mqueue = new metaEntity.accounts.mqueue.MQueue(acc.data);
+        ee.emit('mqueue', mqueue);
+      },
+      'recent',
+    );
+
+    this.mqueue(address).then(mq => {
+      ee.emit('connected', mq.account.messages());
+    });
+
+    return ee;
+  }
+
+  async mqueue(
+    address: PublicKey,
+  ): Promise<ProgramAccount<metaEntity.accounts.mqueue.MQueue>> {
+    const accountInfo = await this.provider.connection.getAccountInfo(address);
+    if (accountInfo === null) {
+      throw new Error(`Entity does not exist ${address}`);
+    }
+    return {
+      publicKey: address,
+      account: new metaEntity.accounts.mqueue.MQueue(accountInfo.data),
+    };
+  }
 }
 
 type InitializeRequest = {
   programId: PublicKey;
   stakeProgramId: PublicKey;
+  metaEntityProgramId: PublicKey;
   mint: PublicKey;
   megaMint: PublicKey;
   withdrawalTimelock: BN;
@@ -1161,11 +1586,15 @@ type UpdateRegistrarResponse = {
 
 type CreateEntityRequest = {
   leader?: Account;
+  name: string;
+  about: string;
+  imageUrl: string;
 };
 
 type CreateEntityResponse = {
   tx: TransactionSignature;
   entity: PublicKey;
+  metadata: PublicKey;
 };
 
 type UpdateEntityRequest = {
@@ -1182,11 +1611,16 @@ type CreateMemberRequest = {
   beneficiary?: Account;
   entity: PublicKey;
   delegate?: PublicKey;
+  poolTokenMint?: PublicKey;
+  megaPoolTokenMint?: PublicKey;
+  registrar?: Registrar;
 };
 
 type CreateMemberResponse = {
   tx: TransactionSignature;
   member: PublicKey;
+  spt: PublicKey;
+  sptMega: PublicKey;
 };
 
 type UpdateMemberRequest = {
@@ -1232,6 +1666,7 @@ type WithdrawRequest = {
   beneficiary?: Account;
   depositorAuthority?: Account;
   vault?: PublicKey;
+  vaultOwner?: PublicKey;
 };
 
 type WithdrawResponse = {
@@ -1243,7 +1678,7 @@ type StakeRequest = {
   beneficiary?: Account;
   entity?: PublicKey;
   amount: BN;
-  stakeToken: PublicKey;
+  spt: PublicKey;
 };
 
 type StakeResponse = {
@@ -1269,9 +1704,10 @@ type StartStakeWithdrawalRequest = {
   beneficiary?: Account;
   entity?: PublicKey;
   amount: BN;
-  stakeToken: PublicKey;
+  spt: PublicKey;
   // generation must be provided if the entity is inactive.
   generation?: PublicKey;
+  registrar?: Registrar;
 };
 
 type StartStakeWithdrawalResponse = {
@@ -1287,6 +1723,17 @@ type EndStakeWithdrawalRequest = {
 };
 
 type EndStakeWithdrawalResponse = {
+  tx: TransactionSignature;
+};
+
+type SendMessageRequest = {
+  from: PublicKey;
+  content: string;
+  ts: BN;
+  mqueue: PublicKey;
+};
+
+type SendMessageResponse = {
   tx: TransactionSignature;
 };
 

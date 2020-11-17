@@ -1,6 +1,6 @@
 import { u8, struct, Layout } from 'buffer-layout';
 import { option, i64, publicKey, rustEnum, u64 } from '@project-serum/borsh';
-import { PublicKey, TransactionInstruction } from '@solana/web3.js';
+import { PublicKey } from '@solana/web3.js';
 import BN from 'bn.js';
 
 export type RegistryInstruction =
@@ -36,15 +36,17 @@ type UpdateRegistrar = {
   maxStakePerEntity: BN | null;
 };
 
-type CreateEntity = {};
+type CreateEntity = {
+  metadata: PublicKey;
+};
 
 type UpdateEntity = {
-  leader: PublicKey;
+  leader: PublicKey | null;
+  metadata: PublicKey | null;
 };
 
 type CreateMember = {
   delegate: PublicKey;
-  nonce: number;
 };
 
 type UpdateMember = {
@@ -95,9 +97,12 @@ const REGISTRY_INSTRUCTION_LAYOUT: Layout<RegistryInstruction> = rustEnum([
     ],
     'updateRegistrar',
   ),
-  struct([], 'createEntity'),
-  struct([publicKey('leader')], 'updateEntity'),
-  struct([publicKey('delegate'), u8('nonce')], 'createMember'),
+  struct([publicKey('metadata')], 'createEntity'),
+  struct(
+    [option(publicKey(), 'leader'), option(publicKey(), 'metadata')],
+    'updateEntity',
+  ),
+  struct([publicKey('delegate')], 'createMember'),
   struct([option(publicKey(), 'delegate')], 'updateMember'),
   struct([], 'switchEntity'),
   struct([u64('amount')], 'deposit'),

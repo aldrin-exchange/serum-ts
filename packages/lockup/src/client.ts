@@ -1,4 +1,5 @@
 import BN from 'bn.js';
+import * as bs58 from 'bs58';
 import {
   TransactionSignature,
   Account,
@@ -19,10 +20,11 @@ import {
   Provider,
   Wallet,
   NodeWallet,
+  ProgramAccount,
+  networks,
 } from '@project-serum/common';
 import * as instruction from './instruction';
 import * as accounts from './accounts';
-import { NeedsAssignment } from './accounts/vesting';
 import { Safe, SIZE as SAFE_SIZE } from './accounts/safe';
 import { Vesting, SIZE as VESTING_SIZE } from './accounts/vesting';
 import {
@@ -30,16 +32,6 @@ import {
   WhitelistEntry,
   SIZE as WHITELIST_SIZE,
 } from './accounts/whitelist';
-
-export const networks = {
-  devnet: {
-    url: 'https://devnet.solana.com',
-    programId: new PublicKey('Fp39W9Ed7Y8YQm4FmgPED62Y2gB5rVHm5aSdswECkdWp'),
-    safe: new PublicKey('A85rfmwbGqTKDXZoiVrYNNFbMPoud2sWeAb2HetfmAMB'),
-    srm: new PublicKey('2gsgrFTjFsckJiPifzkHP3tznMuqVbh5TTUcVd3iMVQx'),
-    god: new PublicKey('9PRbiYDXcFig3C6cu7VBFuypqbaPfqdq8knY85AgvrKw'),
-  },
-};
 
 type Config = {
   provider: Provider;
@@ -62,7 +54,7 @@ export default class Client {
     this.provider = cfg.provider;
     this.programId = cfg.programId;
     this.safe = cfg.safe;
-    this.accounts = new Accounts(cfg.provider, cfg.safe);
+    this.accounts = new Accounts(cfg.provider, cfg.safe, cfg.programId);
   }
 
   // Connects to the devnet deployment of the lockup program.
@@ -78,7 +70,7 @@ export default class Client {
     const provider = new Provider(connection, wallet, opts);
     return new Client({
       provider,
-      programId: networks.devnet.programId,
+      programId: networks.devnet.lockupProgramId,
       safe: networks.devnet.safe,
     });
   }
@@ -169,7 +161,6 @@ export default class Client {
       endTs,
       periodCount,
       depositAmount,
-      needsAssignment,
       depositor,
       depositorAuthority,
     } = req;
@@ -242,7 +233,6 @@ export default class Client {
             endTs,
             periodCount,
             depositAmount,
-            needsAssignment,
           },
         }),
       }),
@@ -578,7 +568,11 @@ export default class Client {
 }
 
 class Accounts {
-  constructor(readonly provider: Provider, private safeAddress: PublicKey) {}
+  constructor(
+    readonly provider: Provider,
+    private safeAddress: PublicKey,
+    private programId: PublicKey,
+  ) {}
 
   async safe(safeAddress?: PublicKey): Promise<Safe> {
     if (safeAddress === undefined) {
@@ -625,6 +619,63 @@ class Accounts {
       programId,
     );
   }
+
+  // Fetch all vesting accounts with the given beneficiary.
+  async allVestings(
+    beneficiary: PublicKey,
+  ): Promise<ProgramAccount<accounts.Vesting>[]> {
+    const vestingBytes = accounts.vesting
+      .encode({
+        ...accounts.vesting.defaultVesting(),
+        initialized: true,
+        safe: this.safeAddress,
+        beneficiary,
+      })
+      .slice(0, 65);
+    let filters = [
+      {
+        memcmp: {
+          offset: 0,
+          bytes: bs58.encode(vestingBytes),
+        },
+      },
+      {
+        dataSize: accounts.vesting.SIZE,
+      },
+    ];
+
+    // @ts-ignore
+    let resp = await this.provider.connection._rpcRequest(
+      'getProgramAccounts',
+      [
+        this.programId.toBase58(),
+        {
+          commitment: this.provider.connection.commitment,
+          filters,
+        },
+      ],
+    );
+    if (resp.error) {
+      throw new Error(
+        'failed to get vesting accounts for ' +
+          beneficiary.toBase58() +
+          ': ' +
+          resp.error.message,
+      );
+    }
+
+    return (
+      resp.result
+        // @ts-ignore
+        .map(({ pubkey, account: { data } }) => {
+          data = bs58.decode(data);
+          return {
+            publicKey: new PublicKey(pubkey),
+            account: accounts.vesting.decode(data),
+          };
+        })
+    );
+  }
 }
 
 type InitializeRequest = {
@@ -644,7 +695,6 @@ type CreateVestingRequest = {
   endTs: BN;
   periodCount: BN;
   depositAmount: BN;
-  needsAssignment: NeedsAssignment | null;
   depositor: PublicKey;
   depositorAuthority?: Account;
 };

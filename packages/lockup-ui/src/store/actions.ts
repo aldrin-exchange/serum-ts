@@ -4,11 +4,37 @@ export type Action = {
 };
 
 export enum ActionType {
-  WalletSetProvider,
-  WalletIsConnected,
-  NetworkSetUrl,
-  OwnedTokenAccountsSet,
-  VestingAccountsSet,
-  VestingAccountCreate,
-  ClearStore,
+  // Common.
+  CommonTriggerBootstrap,
+  CommonAppWillBootstrap,
+  CommonAppDidBootstrap,
+  CommonTriggerShutdown,
+  CommonWalletDidConnect,
+  CommonWalletDidDisconnect,
+  CommonWalletSetProvider,
+  CommonSetNetwork,
+  CommonOwnedTokenAccountsSet,
+  CommonWalletReset,
+  ConsumeLoginOnceToken,
+
+  // Solana.
+  SolanaSlotUpdate,
+
+  // Lockup.
+  LockupSetSafe,
+  LockupSetVestings,
+  LockupCreateVesting,
+
+  // Registry.
+  RegistryCreateEntity,
+  RegistrySetEntities,
+  RegistryUpdateEntity,
+  RegistrySetMember,
+  RegistrySetMetadata,
+  RegistryCreateMetadata,
+  RegistrySetPools,
+  RegistrySetRegistrar,
+  RegistrySetPendingWithdrawals,
+  RegistryCreatePendingWithdrawal,
+  RegistryUpdatePendingWithdrawal,
 }

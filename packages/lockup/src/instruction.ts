@@ -9,13 +9,11 @@ import {
 } from '@project-serum/borsh';
 import { PublicKey } from '@solana/web3.js';
 import BN from 'bn.js';
-import { NeedsAssignment, NEEDS_ASSIGNMENT_LAYOUT } from './accounts/vesting';
 import { WhitelistEntry, WHITELIST_ENTRY_LAYOUT } from './accounts/whitelist';
 
 export type LockupInstruction =
   | Initialize
   | CreateVesting
-  | Assign
   | Claim
   | Redeem
   | WhitelistWithdraw
@@ -35,11 +33,6 @@ type CreateVesting = {
   endTs: BN;
   periodCount: BN;
   depositAmount: BN;
-  needsAssignment: NeedsAssignment | null;
-};
-
-type Assign = {
-  beneficiary: PublicKey;
 };
 
 type Claim = {};
@@ -77,14 +70,9 @@ const LOCKUP_INSTRUCTION_LAYOUT: Layout<LockupInstruction> = rustEnum([
       i64('endTs'),
       u64('periodCount'),
       u64('depositAmount'),
-      option(
-        NEEDS_ASSIGNMENT_LAYOUT.replicate('needsAssignmentInner'),
-        'needsAssignment',
-      ),
     ],
     'createVesting',
   ),
-  struct([publicKey('beneficiary')], 'assign'),
   struct([], 'claim'),
   struct([u64('amount')], 'redeem'),
   struct([u64('amount'), vecU8('instructionData')], 'whitelistWithdraw'),
