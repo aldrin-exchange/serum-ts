@@ -34,7 +34,6 @@ import Me from './Me';
 enum TabModel {
   Me,
   EntityGallery,
-	Registrar,
 }
 
 export default function Stake() {
@@ -183,7 +182,6 @@ function MyNodeBanner(props: MyNodeBannerProps) {
           >
             <Tab value={TabModel.Me} label="Me" />
             <Tab value={TabModel.EntityGallery} label="Nodes" />
-            <Tab value={TabModel.Registrar} label="Registrar" />
           </Tabs>
         </div>
       </div>

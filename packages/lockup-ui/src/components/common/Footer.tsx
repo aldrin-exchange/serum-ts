@@ -244,7 +244,12 @@ function NetworkEnvironment() {
 				Safe
 			</Typography>
 			<ul>
-
+				<li>
+					Authority: {safe.account.authority.toString()}
+				</li>
+				<li>
+					Whitelist: {safe.account.whitelist.toString()}
+				</li>
 			</ul>
     </div>
   );

@@ -198,7 +198,7 @@ export type CommonState = {
 };
 
 export type LockupState = {
-  safe?: ProgramAccount<lockup.accounts.Safe>[];
+  safe?: ProgramAccount<lockup.accounts.Safe>;
   vestings: ProgramAccount<lockup.accounts.Vesting>[];
 };
 
