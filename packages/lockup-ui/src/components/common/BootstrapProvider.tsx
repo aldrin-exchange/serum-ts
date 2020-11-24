@@ -154,18 +154,18 @@ export default function BootstrapProvider(props: PropsWithChildren<ReactNode>) {
       });
     };
 
-		const fetchSafe = async () => {
-			const lockup = await lockupClient.accounts.safe();
-			dispatch({
-				type: ActionType.LockupSetSafe,
-				item: {
-					safe: {
-						publicKey: lockupClient.safe,
-						account: lockup,
-					},
-				},
-			});
-		}
+    const fetchSafe = async () => {
+      const lockup = await lockupClient.accounts.safe();
+      dispatch({
+        type: ActionType.LockupSetSafe,
+        item: {
+          safe: {
+            publicKey: lockupClient.safe,
+            account: lockup,
+          },
+        },
+      });
+    };
 
     // Connections.
 
@@ -234,7 +234,7 @@ export default function BootstrapProvider(props: PropsWithChildren<ReactNode>) {
 
     // Break up to avoid rate limits.
     await fetchRegistrar();
-		await fetchSafe();
+    await fetchSafe();
     await fetchEntityAccounts();
     await fetchPoolData();
     await fetchOwnedTokenAccounts();
@@ -251,7 +251,7 @@ export default function BootstrapProvider(props: PropsWithChildren<ReactNode>) {
       autoHideDuration: 2500,
     });
   }, [
-		lockupClient.safe,
+    lockupClient.safe,
     lockupClient.accounts,
     dispatch,
     enqueueSnackbar,

@@ -26,6 +26,7 @@ export default function Layout(props: PropsWithChildren<Props>) {
         backgroundColor: 'rgb(251, 251, 251)',
       }}
     >
+      <RiskBar />
       <Header isAppReady={isAppReady} />
       <div
         style={{
@@ -41,6 +42,32 @@ export default function Layout(props: PropsWithChildren<Props>) {
         )}
       </div>
       <Footer />
+    </div>
+  );
+}
+
+function RiskBar() {
+  return (
+    <div
+      style={{
+        color: '#fff',
+        backgroundColor: '#f50057',
+        height: '30px',
+        textAlign: 'center',
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'center',
+          flexDirection: 'column',
+          height: '100%',
+        }}
+      >
+        <Typography style={{ fontSize: '14px', fontWeight: 'bold' }}>
+          This is unaudited software. Use at your own risk.
+        </Typography>
+      </div>
     </div>
   );
 }

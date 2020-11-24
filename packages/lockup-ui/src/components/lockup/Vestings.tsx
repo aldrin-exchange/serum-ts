@@ -1,7 +1,6 @@
 import React from 'react';
 import { useSelector } from 'react-redux';
 import ChartistGraph from 'react-chartist';
-import BN from 'bn.js';
 import { FixedScaleAxis, IChartOptions, Interpolation } from 'chartist';
 import { Link as RouterLink } from 'react-router-dom';
 import Card from '@material-ui/core/Card';
@@ -20,14 +19,12 @@ import { ProgramAccount, State as StoreState } from '../../store/reducer';
 
 export default function Vestings() {
   const { wallet } = useWallet();
-  const { vestingAccounts, network } = useSelector(
-    (state: StoreState) => {
-      return {
-        vestingAccounts: state.lockup.vestings,
-        network: state.common.network,
-      };
-    },
-  );
+  const { vestingAccounts, network } = useSelector((state: StoreState) => {
+    return {
+      vestingAccounts: state.lockup.vestings,
+      network: state.common.network,
+    };
+  });
   const urlSuffix = `?cluster=${network.explorerClusterSuffix}`;
   return (
     <Container fixed maxWidth="md" style={{ flex: 1 }}>
@@ -100,10 +97,7 @@ export default function Vestings() {
         </Card>
         <List disablePadding>
           {vestingAccounts.map(v => (
-            <VestingAccountCard
-              network={network}
-              vesting={v}
-            />
+            <VestingAccountCard network={network} vesting={v} />
           ))}
           {vestingAccounts.length === 0 && (
             <Card
@@ -135,14 +129,16 @@ export default function Vestings() {
 }
 
 type VestingAccountCardProps = {
-	network: Network;
+  network: Network;
   vesting: ProgramAccount<accounts.Vesting>;
 };
 
 function VestingAccountCard(props: VestingAccountCardProps) {
   const { vesting, network } = props;
 
-	const currencyLabel = (vesting.account.mint.equals(network.srm)) ? 'SRM' : 'MSRM';
+  const currencyLabel = vesting.account.mint.equals(network.srm)
+    ? 'SRM'
+    : 'MSRM';
 
   const startTs = vesting.account.startTs;
   const endTs = vesting.account.endTs;

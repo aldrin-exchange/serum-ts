@@ -591,7 +591,6 @@ function RedemptionList(props: RedemptionListProps) {
   );
 }
 
-
 type PendingWithdrawalButtonProps = {
   pendingWithdrawal: ProgramAccount<accounts.PendingWithdrawal>;
   member: ProgramAccount<accounts.Member>;
