@@ -50,26 +50,19 @@ export default function NewVesting() {
   const displayAmountError = !isValidAmountStr && amountStr !== '';
   const amount = parseInt(amountStr);
 
-  const srmMint = network.srm;
-  const ownedTokenAccounts = useSelector((state: StoreState) =>
-    state.common.ownedTokenAccounts.filter(
-      ota => ota.account.mint.toString() === srmMint.toString(),
-    ),
-  );
-
-  const isValidOwnedTokenAccounts = ownedTokenAccounts.length > 0;
-
   const submitBtnEnabled =
     fromAccount !== null &&
     isValidBeneficiary &&
-    isValidAmountStr &&
-    isValidOwnedTokenAccounts;
+    isValidAmountStr;
 
   const { lockupClient } = useWallet();
   const [isLoading, setIsLoading] = useState(false);
 
   const { enqueueSnackbar } = useSnackbar();
   const dispatch = useDispatch();
+	const [mint, setMint] = useState<null | PublicKey>(null);
+	const [mintLabel, setMintLabel] = useState('');
+	const [customMint, setCustomMint] = useState('');
 
   return (
     <Container fixed maxWidth="md" style={{ flex: 1 }}>
@@ -98,14 +91,43 @@ export default function NewVesting() {
                 marginTop: '24px',
               }}
             >
-              <FormControl fullWidth>
-                <InputLabel>From</InputLabel>
-                <OwnedTokenAccountsSelect
-                  mint={srmMint}
-                  onChange={(f: PublicKey) => setFromAccount(f)}
-                />
-                <FormHelperText>Token account to send from</FormHelperText>
-              </FormControl>
+							<div style={{ display: 'flex', width: '100%' }}>
+								<div style={{ flex: 1 }}>
+									<FormControl fullWidth>
+										<InputLabel>From</InputLabel>
+										<OwnedTokenAccountsSelect
+										mint={mint}
+										onChange={(f: PublicKey) => setFromAccount(f)}
+										/>
+										<FormHelperText>Token account to send from</FormHelperText>
+									</FormControl>
+								</div>
+								<div>
+									<FormControl
+										variant="outlined"
+										style={{ width: '200px', marginLeft: '10px' }}
+									>
+										<InputLabel>Mint</InputLabel>
+										<Select
+											value={mintLabel}
+											onChange={e => {
+												const m = e.target.value;
+												setMintLabel(m as string);
+												if (m === 'srm') {
+													setMint(network.srm);
+												} else if (m === 'msrm') {
+													setMint(network.msrm);
+												}
+												// TODO: add a textfield for a custom mint.
+											}}
+											label="Mint"
+										>
+											<MenuItem value="srm">SRM</MenuItem>
+											<MenuItem value="msrm">MSRM</MenuItem>
+		               </Select>
+									</FormControl>
+								</div>
+							</div>
             </div>
             <div style={{ marginTop: '24px' }}>
               <TextField

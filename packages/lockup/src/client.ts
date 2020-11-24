@@ -22,6 +22,8 @@ import {
   NodeWallet,
   ProgramAccount,
   networks,
+  createTokenAccountInstrs,
+  getTokenAccount,
 } from '@project-serum/common';
 import * as instruction from './instruction';
 import * as accounts from './accounts';
@@ -79,18 +81,12 @@ export default class Client {
     provider: Provider,
     req: InitializeRequest,
   ): Promise<[Client, InitializeResponse]> {
-    let { programId, mint, authority } = req;
+    let { programId, authority } = req;
     if (authority === undefined) {
       authority = provider.wallet.publicKey;
     }
     const safe = new Account();
     const whitelist = new Account();
-
-    const [vaultAuthority, vaultNonce] = await PublicKey.findProgramAddress(
-      [safe.publicKey.toBuffer()],
-      programId,
-    );
-    const vault = await createTokenAccount(provider, mint, vaultAuthority);
 
     let tx = new Transaction();
     tx.add(
@@ -119,15 +115,12 @@ export default class Client {
         keys: [
           { pubkey: safe.publicKey, isWritable: true, isSigner: false },
           { pubkey: whitelist.publicKey, isWritable: true, isSigner: false },
-          { pubkey: vault, isWritable: false, isSigner: false },
-          { pubkey: mint, isWritable: false, isSigner: false },
           { pubkey: SYSVAR_RENT_PUBKEY, isWritable: false, isSigner: false },
         ],
         programId: programId,
         data: instruction.encode({
           initialize: {
             authority,
-            nonce: vaultNonce,
           },
         }),
       }),
@@ -163,10 +156,16 @@ export default class Client {
       depositAmount,
       depositor,
       depositorAuthority,
+      mint,
     } = req;
 
     if (beneficiary === undefined) {
       beneficiary = new PublicKey(Buffer.alloc(32));
+    }
+
+    if (mint === undefined) {
+      const dTokenAccount = await getTokenAccount(this.provider, depositor);
+      mint = dTokenAccount.mint;
     }
 
     const depositorAuthorityPubkey =
@@ -175,16 +174,19 @@ export default class Client {
         : depositorAuthority.publicKey;
 
     const vesting = new Account();
-
-    const safe = await this.accounts.safe(this.safe);
-    const vault = safe.vault;
-    const vaultAuthority = await this.accounts.vaultAuthority(
-      this.programId,
-      this.safe,
-      safe,
-    );
-
+    const vault = new Account();
     const lockedTokenMint = new Account();
+
+    const [vaultAuthority, nonce] = await PublicKey.findProgramAddress(
+      [this.safe.toBuffer(), vesting.publicKey.toBuffer()],
+      this.programId,
+    );
+    const createVaultInstructions = await createTokenAccountInstrs(
+      this.provider,
+      vault.publicKey,
+      mint,
+      vaultAuthority,
+    );
     const createLockedTokenMintInstructions = await createMintInstructions(
       this.provider,
       vaultAuthority,
@@ -193,6 +195,7 @@ export default class Client {
 
     const tx = new Transaction();
     tx.add(
+      ...createVaultInstructions,
       ...createLockedTokenMintInstructions,
       // Allocate account.
       SystemProgram.createAccount({
@@ -214,14 +217,13 @@ export default class Client {
             isWritable: false,
             isSigner: true,
           },
-          { pubkey: vault, isWritable: true, isSigner: false },
+          { pubkey: vault.publicKey, isWritable: true, isSigner: false },
           { pubkey: this.safe, isWritable: false, isSigner: false },
           {
             pubkey: lockedTokenMint.publicKey,
             isWritable: true,
             isSigner: false,
           },
-          { pubkey: vaultAuthority, isWritable: false, isSigner: false },
           { pubkey: TOKEN_PROGRAM_ID, isWritable: false, isSigner: false },
           { pubkey: SYSVAR_RENT_PUBKEY, isWritable: false, isSigner: false },
           { pubkey: SYSVAR_CLOCK_PUBKEY, isWritable: false, isSigner: false },
@@ -233,12 +235,13 @@ export default class Client {
             endTs,
             periodCount,
             depositAmount,
+            nonce,
           },
         }),
       }),
     );
 
-    let signers = [vesting, lockedTokenMint, depositorAuthority];
+    let signers = [vesting, vault, lockedTokenMint, depositorAuthority];
 
     let txSig = await this.provider.send(tx, signers);
 
@@ -272,6 +275,7 @@ export default class Client {
     const vaultAuthority = await this.accounts.vaultAuthority(
       this.programId,
       this.safe,
+      vesting,
     );
 
     const tx = new Transaction();
@@ -311,13 +315,12 @@ export default class Client {
         : beneficiary.publicKey;
 
     const vestingAcc = await this.accounts.vesting(vesting);
-
-    const safe = await this.accounts.safe(this.safe);
-    const vault = safe.vault;
+    const vault = vestingAcc.vault;
     const vaultAuthority = await this.accounts.vaultAuthority(
       this.programId,
       this.safe,
-      safe,
+      vesting,
+      vestingAcc,
     );
 
     const tx = new Transaction();
@@ -372,6 +375,7 @@ export default class Client {
       whitelistProgramVaultAuthority,
       relayAccounts,
       relaySigners,
+      safe,
     } = req;
 
     const beneficiaryAddress =
@@ -379,12 +383,16 @@ export default class Client {
         ? this.provider.wallet.publicKey
         : beneficiary.publicKey;
 
-    const safe = await this.accounts.safe(this.safe);
-    const vault = safe.vault;
+    if (safe === undefined) {
+      safe = await this.accounts.safe();
+    }
+    const vestingAcc = await this.accounts.vesting(vesting);
+    const vault = vestingAcc.vault;
     const vaultAuthority = await this.accounts.vaultAuthority(
       this.programId,
       this.safe,
-      safe,
+      vesting,
+      vestingAcc,
     );
 
     const tx = new Transaction();
@@ -435,6 +443,7 @@ export default class Client {
       whitelistProgramVaultAuthority,
       relayAccounts,
       relaySigners,
+      safe,
     } = req;
 
     const beneficiaryAddress =
@@ -442,12 +451,17 @@ export default class Client {
         ? this.provider.wallet.publicKey
         : beneficiary.publicKey;
 
-    const safe = await this.accounts.safe(this.safe);
-    const vault = safe.vault;
+    if (safe === undefined) {
+      safe = await this.accounts.safe();
+    }
+
+    const vestingAcc = await this.accounts.vesting(vesting);
+    const vault = vestingAcc.vault;
     const vaultAuthority = await this.accounts.vaultAuthority(
       this.programId,
       this.safe,
-      safe,
+      vesting,
+      vestingAcc,
     );
 
     const tx = new Transaction();
@@ -609,13 +623,18 @@ class Accounts {
   async vaultAuthority(
     programId: PublicKey,
     safeAddress: PublicKey,
-    safe?: Safe,
+    vestingAddress: PublicKey,
+    vesting?: Vesting,
   ): Promise<PublicKey> {
-    if (safe === undefined) {
-      safe = await this.safe(safeAddress);
+    if (vesting === undefined) {
+      vesting = await this.vesting(vestingAddress);
     }
     return PublicKey.createProgramAddress(
-      [safeAddress.toBuffer(), Buffer.from([safe.nonce])],
+      [
+        safeAddress.toBuffer(),
+        vestingAddress.toBuffer(),
+        Buffer.from([vesting.nonce]),
+      ],
       programId,
     );
   }
@@ -680,7 +699,6 @@ class Accounts {
 
 type InitializeRequest = {
   programId: PublicKey;
-  mint: PublicKey;
   authority?: PublicKey;
 };
 
@@ -697,6 +715,7 @@ type CreateVestingRequest = {
   depositAmount: BN;
   depositor: PublicKey;
   depositorAuthority?: Account;
+  mint?: PublicKey;
 };
 
 type CreateVestingResponse = {
@@ -737,6 +756,7 @@ type WhitelistWithdrawRequest = {
   relayAccounts: Array<AccountMeta>;
   relaySigners: Array<Account>;
   beneficiary?: Account;
+  safe?: Safe;
 };
 
 type WhitelistWithdrawResponse = {
@@ -751,6 +771,7 @@ type WhitelistDepositRequest = {
   relayAccounts: Array<AccountMeta>;
   relaySigners: Array<Account>;
   beneficiary?: Account;
+  safe?: Safe;
 };
 
 type WhitelistDepositResponse = {

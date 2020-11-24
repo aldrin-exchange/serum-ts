@@ -14,26 +14,21 @@ import ListItemText from '@material-ui/core/ListItemText';
 import Link from '@material-ui/core/Link';
 import Button from '@material-ui/core/Button';
 import { accounts } from '@project-serum/lockup';
+import { Network } from '@project-serum/common';
 import { useWallet } from '../../components/common/WalletProvider';
 import { ProgramAccount, State as StoreState } from '../../store/reducer';
 
 export default function Vestings() {
   const { wallet } = useWallet();
-  const { vestingAccounts, explorerClusterSuffix } = useSelector(
+  const { vestingAccounts, network } = useSelector(
     (state: StoreState) => {
       return {
         vestingAccounts: state.lockup.vestings,
-        explorerClusterSuffix: state.common.network.explorerClusterSuffix,
+        network: state.common.network,
       };
     },
   );
-  const urlSuffix = `?cluster=${explorerClusterSuffix}`;
-  const totalBalance = wallet.publicKey
-    ? vestingAccounts
-        .map(va => va.account.balance)
-        .reduce((a, b) => a.add(b), new BN(0))
-        .toNumber()
-    : 0;
+  const urlSuffix = `?cluster=${network.explorerClusterSuffix}`;
   return (
     <Container fixed maxWidth="md" style={{ flex: 1 }}>
       <div style={{ marginTop: '24px', marginBottom: '24px' }}>
@@ -97,21 +92,6 @@ export default function Vestings() {
                     </Link>
                   </Typography>
                 </div>
-                <div>
-                  <div
-                    style={{
-                      marginTop: '6px',
-                      color: 'rgba(0, 0, 0, 0.54)',
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      flexDirection: 'column',
-                    }}
-                  >
-                    <Typography variant="body1">
-                      {`${totalBalance} SRM`}
-                    </Typography>
-                  </div>
-                </div>
               </div>
             ) : (
               <Typography variant="h5">Disconnected</Typography>
@@ -121,7 +101,7 @@ export default function Vestings() {
         <List disablePadding>
           {vestingAccounts.map(v => (
             <VestingAccountCard
-              explorerClusterSuffix={explorerClusterSuffix}
+              network={network}
               vesting={v}
             />
           ))}
@@ -155,12 +135,15 @@ export default function Vestings() {
 }
 
 type VestingAccountCardProps = {
-  explorerClusterSuffix: string;
+	network: Network;
   vesting: ProgramAccount<accounts.Vesting>;
 };
 
 function VestingAccountCard(props: VestingAccountCardProps) {
-  const { vesting, explorerClusterSuffix } = props;
+  const { vesting, network } = props;
+
+	const currencyLabel = (vesting.account.mint.equals(network.srm)) ? 'SRM' : 'MSRM';
+
   const startTs = vesting.account.startTs;
   const endTs = vesting.account.endTs;
 
@@ -204,8 +187,7 @@ function VestingAccountCard(props: VestingAccountCardProps) {
     new Date(vesting.account.endTs.toNumber() * 1000),
   );
 
-  const currencyLabel = 'SRM'; // todo: don't hardcode.
-  const urlSuffix = `?cluster=${explorerClusterSuffix}`;
+  const urlSuffix = `?cluster=${network.explorerClusterSuffix}`;
   return (
     <Card
       key={vesting.publicKey.toString()}

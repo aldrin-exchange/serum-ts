@@ -251,6 +251,7 @@ export default function BootstrapProvider(props: PropsWithChildren<ReactNode>) {
       autoHideDuration: 2500,
     });
   }, [
+		lockupClient.safe,
     lockupClient.accounts,
     dispatch,
     enqueueSnackbar,

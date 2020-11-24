@@ -6,7 +6,7 @@ import { PublicKey } from '@solana/web3.js';
 import { State as StoreState } from '../../store/reducer';
 
 type Props = {
-  mint?: PublicKey;
+  mint?: PublicKey | null;
   variant?: 'outlined' | 'standard';
   onChange: (from: PublicKey) => void;
 };

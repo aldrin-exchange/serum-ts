@@ -34,7 +34,6 @@ describe('End-to-end tests', () => {
     // Initialize the safe.
     const [client, { safe }] = await Client.initialize(provider, {
       programId,
-      mint: srmMint,
     });
     // Whitelist add.
     let entry = await generateWhitelistEntry();

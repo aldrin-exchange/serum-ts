@@ -209,7 +209,7 @@ export default function Me() {
   };
 
   return (
-    <div style={{ display: 'flex' }}>
+    <div style={{ display: 'flex', width: '100%' }}>
       <div style={{ flex: 1, marginTop: '24px', marginBottom: '24px' }}>
         {member && <MemberBalancesCard prices={prices} member={member} />}
         <PoolCard

@@ -1,5 +1,5 @@
 import { struct, u8, Layout } from 'buffer-layout';
-import { bool, i64, publicKey, u64, option } from '@project-serum/borsh';
+import { bool, i64, publicKey, u64 } from '@project-serum/borsh';
 import { PublicKey } from '@solana/web3.js';
 import BN from 'bn.js';
 
@@ -7,6 +7,8 @@ export interface Vesting {
   initialized: boolean;
   safe: PublicKey;
   beneficiary: PublicKey;
+  mint: PublicKey;
+  vault: PublicKey;
   claimed: boolean;
   grantor: PublicKey;
   balance: BN;
@@ -17,12 +19,15 @@ export interface Vesting {
   lockedNftMint: PublicKey;
   lockedNftToken: PublicKey;
   whitelistOwned: BN;
+  nonce: number;
 }
 
 export const VESTING_LAYOUT: Layout<Vesting> = struct([
   bool('initialized'),
   publicKey('safe'),
   publicKey('beneficiary'),
+  publicKey('mint'),
+  publicKey('vault'),
   bool('claimed'),
   publicKey('grantor'),
   u64('balance'),
@@ -33,6 +38,7 @@ export const VESTING_LAYOUT: Layout<Vesting> = struct([
   publicKey('lockedNftMint'),
   publicKey('lockedNftToken'),
   u64('whitelistOwned'),
+  u8('nonce'),
 ]);
 
 export function decode(data: Buffer): Vesting {
@@ -50,6 +56,8 @@ export function defaultVesting(): Vesting {
     initialized: false,
     safe: new PublicKey(Buffer.alloc(32)),
     beneficiary: new PublicKey(Buffer.alloc(32)),
+    mint: new PublicKey(Buffer.alloc(32)),
+    vault: new PublicKey(Buffer.alloc(32)),
     claimed: false,
     grantor: new PublicKey(Buffer.alloc(32)),
     balance: new BN(0),
@@ -60,6 +68,7 @@ export function defaultVesting(): Vesting {
     lockedNftMint: new PublicKey(Buffer.alloc(32)),
     lockedNftToken: new PublicKey(Buffer.alloc(32)),
     whitelistOwned: new BN(0),
+    nonce: 0,
   };
 }
 
