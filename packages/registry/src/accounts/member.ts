@@ -1,5 +1,10 @@
-import { struct, u8, Layout } from 'buffer-layout';
-import { bool, publicKey, u64 as borshU64 } from '@project-serum/borsh';
+import { struct, u8, u32, Layout } from 'buffer-layout';
+import {
+  bool,
+  publicKey,
+  u64 as borshU64,
+  i64 as borshI64,
+} from '@project-serum/borsh';
 import { u64 } from '@solana/spl-token';
 import { PublicKey } from '@solana/web3.js';
 import BN from 'bn.js';
@@ -16,6 +21,8 @@ export interface Member {
   metadata: PublicKey;
   spt: PublicKey;
   sptMega: PublicKey;
+  lockedRewardsCursor: number;
+  lastStakeTs: BN;
 }
 
 interface MemberBalances {
@@ -59,6 +66,8 @@ export const MEMBER_LAYOUT: Layout<Member> = struct([
   publicKey('metadata'),
   publicKey('spt'),
   publicKey('sptMega'),
+  u32('lockedRewardsCursor'),
+  borshI64('lastStakeTs'),
 ]);
 
 export function decode(data: Buffer): Member {
@@ -105,6 +114,8 @@ export function defaultMember(): Member {
     metadata: new PublicKey(Buffer.alloc(32)),
     spt: new PublicKey(Buffer.alloc(32)),
     sptMega: new PublicKey(Buffer.alloc(32)),
+    lockedRewardsCursor: 0,
+    lastStakeTs: new BN(0),
   };
 }
 
