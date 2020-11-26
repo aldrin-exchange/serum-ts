@@ -18,12 +18,14 @@ import Tab from '@material-ui/core/Tab';
 import Typography from '@material-ui/core/Typography';
 import TextField from '@material-ui/core/TextField';
 import FormHelperText from '@material-ui/core/FormHelperText';
+import Paper from '@material-ui/core/Paper';
 import * as registry from '@project-serum/registry';
 import { PublicKey } from '@solana/web3.js';
 import { useWallet } from '../../components/common/WalletProvider';
 import OwnedTokenAccountsSelect from '../common/OwnedTokenAccountsSelect';
 import { ViewTransactionOnExplorerButton } from '../common/Notification';
 import { State as StoreState } from '../../store/reducer';
+import AppBar from '@material-ui/core/AppBar';
 
 export default function Rewards() {
   const { rewardEventQueue } = useSelector((state: StoreState) => {
@@ -34,21 +36,21 @@ export default function Rewards() {
   const rewards = rewardEventQueue!.account.messages();
   console.log('rewards = ', rewards);
   return (
-    <>
-      <div style={{ width: '100%', marginTop: '24px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-          <Typography style={{ fontWeight: 'bold' }}>Rewards</Typography>
+    <div style={{ width: '100%', marginTop: '24px' }}>
+        <div style={{ marginBottom: '10px', display: 'flex', justifyContent: 'space-between' }}>
+          <Typography style={{ fontWeight: 'bold', fontSize: '20px', }}>Reward History</Typography>
           <div>
             <DropButton />
           </div>
-        </div>
+    </div>
+		<Paper>
         <List>
           {rewards.map(r => {
             return <RewardListItem reward={r} />;
           })}
         </List>
+    </Paper>
       </div>
-    </>
   );
 }
 
@@ -73,6 +75,43 @@ type DropRewardsDialogProps = {
   open: boolean;
   onClose: () => void;
 };
+
+type RewardListItemProps = {
+  reward: registry.accounts.RewardEvent;
+};
+
+function RewardListItem(props: RewardListItemProps) {
+  const { reward } = props;
+  if (reward.poolDrop !== undefined) {
+    return <PoolDropReward poolDrop={reward.poolDrop} />;
+  } else {
+    return <div> </div>;
+  }
+}
+
+type PoolDropRewardProps = {
+  poolDrop: registry.accounts.PoolDrop;
+};
+
+function PoolDropReward(props: PoolDropRewardProps) {
+  const { poolDrop } = props;
+  let amountLabel = `${poolDrop.totals[0].toString()} SRM`;
+  if (poolDrop.totals.length === 2) {
+    amountLabel += ` ${poolDrop.totals[1].toString()} MSRM`;
+  }
+  let lockedLabel = 'unlocked';
+  let fromLabel = poolDrop.from.toString();
+  return (
+    <>
+      <ListItem>
+        <ListItemText
+          primary={<>{`${amountLabel} ${lockedLabel}`}</>}
+          secondary={fromLabel}
+        />
+      </ListItem>
+    </>
+  );
+}
 
 enum PoolTabViewModel {
   Srm,
@@ -288,42 +327,5 @@ function DropRewardsDialog(props: DropRewardsDialogProps) {
         </DialogActions>
       </DialogContent>
     </Dialog>
-  );
-}
-
-type RewardListItemProps = {
-  reward: registry.accounts.RewardEvent;
-};
-
-function RewardListItem(props: RewardListItemProps) {
-  const { reward } = props;
-  if (reward.poolDrop !== undefined) {
-    return <PoolDropReward poolDrop={reward.poolDrop} />;
-  } else {
-    return <div> </div>;
-  }
-}
-
-type PoolDropRewardProps = {
-  poolDrop: registry.accounts.PoolDrop;
-};
-
-function PoolDropReward(props: PoolDropRewardProps) {
-  const { poolDrop } = props;
-  let amountLabel = `${poolDrop.totals[0].toString()} SRM`;
-  if (poolDrop.totals.length === 2) {
-    amountLabel += ` ${poolDrop.totals[1].toString()} MSRM`;
-  }
-  let lockedLabel = 'unlocked';
-  let fromLabel = poolDrop.from.toString();
-  return (
-    <>
-      <ListItem>
-        <ListItemText
-          primary={<>{`${amountLabel} ${lockedLabel}`}</>}
-          secondary={fromLabel}
-        />
-      </ListItem>
-    </>
   );
 }

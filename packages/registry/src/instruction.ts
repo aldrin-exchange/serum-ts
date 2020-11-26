@@ -96,7 +96,7 @@ type DropLockedReward = {
   total: BN;
   expiryTs: BN;
   expiryReceiver: PublicKey;
-  lockedVendor: PublicKey;
+  nonce: number;
 };
 
 type ClaimLockedReward = {};
@@ -140,12 +140,7 @@ const REGISTRY_INSTRUCTION_LAYOUT: Layout<RegistryInstruction> = rustEnum([
   struct([u64('amount')], 'slash'),
   struct([vec(u64(), 'totals')], 'dropPoolReward'),
   struct(
-    [
-      u64('total'),
-      i64('expiryTs'),
-      publicKey('expiryReceiver'),
-      publicKey('lockedVendor'),
-    ],
+    [u64('total'), i64('expiryTs'), publicKey('expiryReceiver'), u8('nonce')],
     'dropLockedReward',
   ),
   struct([], 'claimLockedReward'),
