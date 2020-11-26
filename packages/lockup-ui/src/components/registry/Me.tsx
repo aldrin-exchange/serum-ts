@@ -715,8 +715,8 @@ export class PoolPrices {
     if (this.poolTokenMint.supply.toNumber() === 0) {
       return { quantities: [new u64(sptAmount)] };
     }
-		// TODO: need to more thoughtfully handle the case where the token supply
-		//       resets *and* there exists rewards in the pool.
+    // TODO: need to more thoughtfully handle the case where the token supply
+    //       resets *and* there exists rewards in the pool.
     return {
       quantities: [
         this.poolVault.amount

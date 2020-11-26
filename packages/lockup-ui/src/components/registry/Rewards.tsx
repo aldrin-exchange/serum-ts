@@ -26,13 +26,13 @@ import { ViewTransactionOnExplorerButton } from '../common/Notification';
 import { State as StoreState } from '../../store/reducer';
 
 export default function Rewards() {
-	const { rewardEventQueue } = useSelector((state: StoreState) => {
+  const { rewardEventQueue } = useSelector((state: StoreState) => {
     return {
-			rewardEventQueue: state.registry.rewardEventQueue,
+      rewardEventQueue: state.registry.rewardEventQueue,
     };
   });
-	const rewards = rewardEventQueue!.account.messages();
-	console.log('rewards = ', rewards);
+  const rewards = rewardEventQueue!.account.messages();
+  console.log('rewards = ', rewards);
   return (
     <>
       <div style={{ width: '100%', marginTop: '24px' }}>
@@ -75,33 +75,29 @@ type DropRewardsDialogProps = {
 };
 
 enum PoolTabViewModel {
-	Srm,
-	Msrm,
+  Srm,
+  Msrm,
 }
 
 enum LockedTabViewModel {
-	Locked,
-	Unlocked,
+  Locked,
+  Unlocked,
 }
 
 function DropRewardsDialog(props: DropRewardsDialogProps) {
   const { enqueueSnackbar, closeSnackbar } = useSnackbar();
-	const { registryClient } = useWallet();
-  const {
-		network,
-		pool,
-		poolVault,
-		megaPool,
-		megaPoolVaults,
-	} = useSelector((state: StoreState) => {
-    return {
-      network: state.common.network,
-      pool: state.registry.pool!,
-      poolVault: state.registry.poolVault!,
-      megaPool: state.registry.megaPool!,
-      megaPoolVaults: state.registry.megaPoolVaults!,
-    };
-  });
+  const { registryClient } = useWallet();
+  const { network, pool, poolVault, megaPool, megaPoolVaults } = useSelector(
+    (state: StoreState) => {
+      return {
+        network: state.common.network,
+        pool: state.registry.pool!,
+        poolVault: state.registry.poolVault!,
+        megaPool: state.registry.megaPool!,
+        megaPoolVaults: state.registry.megaPoolVaults!,
+      };
+    },
+  );
   const { open, onClose } = props;
   const [poolTab, setPoolTab] = useState(PoolTabViewModel.Srm);
   const [srmFromAccount, setSrmFromAccount] = useState<null | PublicKey>(null);
@@ -110,69 +106,133 @@ function DropRewardsDialog(props: DropRewardsDialogProps) {
   );
   const [rewardAmount, setRewardAmount] = useState<null | number>(null);
   const [rewardMegaAmount, setRewardMegaAmount] = useState<null | number>(null);
-	const [isLockedTab, setIsLockedTab] = useState(LockedTabViewModel.Unlocked);
-	const isLocked = isLockedTab === LockedTabViewModel.Locked;
-	const isSendEnabled = (() => {
-		// todo
-		return true;
-	})();
-	const sendRewards = async () => {
-		enqueueSnackbar('Dropping rewards...', {
-			variant: 'info',
-		});
+  const [isLockedTab, setIsLockedTab] = useState(LockedTabViewModel.Unlocked);
+  const isLocked = isLockedTab === LockedTabViewModel.Locked;
+  const [lockedRewardAmount, setLockedRewardAmount] = useState<null | number>(
+    null,
+  );
+  const [endLockedTimestamp, setLockedEndTimestamp] = useState<null | number>(
+    null,
+  );
+  const [lockedVendor, setLockedVendor] = useState<null | string>(null);
 
-		let { tx } = await registryClient.dropReward({
-			pool: poolTab === PoolTabViewModel.Srm ? pool.publicKey : megaPool.publicKey,
-			srmDepositor: srmFromAccount as PublicKey,
-			msrmDepositor: poolTab === PoolTabViewModel.Msrm ? msrmFromAccount as PublicKey : undefined,
-			srmAmount: new BN(rewardAmount!),
-			msrmAmount: poolTab === PoolTabViewModel.Msrm ? new BN(rewardMegaAmount!) : undefined,
-			poolSrmVault: poolTab === PoolTabViewModel.Msrm ? megaPoolVaults[0].publicKey : poolVault.publicKey,
-			poolMsrmVault: poolTab === PoolTabViewModel.Msrm ? megaPoolVaults[1].publicKey : undefined,
-		});
-		closeSnackbar();
-		enqueueSnackbar('Dropping rewards...', {
-			variant: 'info',
-			action: <ViewTransactionOnExplorerButton signature={tx} />
-		});
+  const isSendEnabled = (() => {
+    // todo
+    return true;
+  })();
+  const sendRewards = async () => {
+    enqueueSnackbar('Dropping rewards...', {
+      variant: 'info',
+    });
 
-		onClose();
-	};
+    let { tx } = await registryClient.dropReward({
+      pool:
+        poolTab === PoolTabViewModel.Srm ? pool.publicKey : megaPool.publicKey,
+      srmDepositor: srmFromAccount as PublicKey,
+      msrmDepositor:
+        poolTab === PoolTabViewModel.Msrm
+          ? (msrmFromAccount as PublicKey)
+          : undefined,
+      srmAmount: new BN(rewardAmount!),
+      msrmAmount:
+        poolTab === PoolTabViewModel.Msrm
+          ? new BN(rewardMegaAmount!)
+          : undefined,
+      poolSrmVault:
+        poolTab === PoolTabViewModel.Msrm
+          ? megaPoolVaults[0].publicKey
+          : poolVault.publicKey,
+      poolMsrmVault:
+        poolTab === PoolTabViewModel.Msrm
+          ? megaPoolVaults[1].publicKey
+          : undefined,
+    });
+    closeSnackbar();
+    enqueueSnackbar('Dropping rewards...', {
+      variant: 'info',
+      action: <ViewTransactionOnExplorerButton signature={tx} />,
+    });
+
+    onClose();
+  };
 
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="md">
       <DialogTitle>
         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-          <div>{'Drop Rewards'}</div>
+          <Typography variant="h4" component="h2">
+            {'Drop Rewards'}
+          </Typography>
         </div>
       </DialogTitle>
       <DialogContent>
-						<div>
-              <Tabs value={isLockedTab} onChange={(_e, t) => setIsLockedTab(t)}>
-                <Tab value={LockedTabViewModel.Unlocked} label="Unlocked" />
-                <Tab value={LockedTabViewModel.Locked} label="Locked" />
-              </Tabs>
-						</div>
-            <div>
-              <Tabs value={poolTab} onChange={(_e, t) => setPoolTab(t)}>
-                <Tab value={PoolTabViewModel.Srm} label="Pool" />
-                <Tab value={PoolTabViewModel.Msrm} label="Mega Pool" />
-              </Tabs>
-            </div>
+        <div>
+          <Tabs value={isLockedTab} onChange={(_e, t) => setIsLockedTab(t)}>
+            <Tab value={LockedTabViewModel.Unlocked} label="Unlocked" />
+            <Tab value={LockedTabViewModel.Locked} label="Locked" />
+          </Tabs>
+        </div>
+        <div style={{ marginTop: '10px' }}>
+          <Tabs value={poolTab} onChange={(_e, t) => setPoolTab(t)}>
+            <Tab value={PoolTabViewModel.Srm} label="Pool" />
+            <Tab value={PoolTabViewModel.Msrm} label="Mega Pool" />
+          </Tabs>
+        </div>
+        {isLocked && (
+          <div>
+            <TextField
+              style={{ marginTop: '10px' }}
+              id="outlined-number"
+              label="Amount"
+              type="number"
+              InputLabelProps={{
+                shrink: true,
+              }}
+              variant="outlined"
+              onChange={e =>
+                setLockedRewardAmount(parseInt(e.target.value) as number)
+              }
+              InputProps={{ inputProps: { min: 0 } }}
+            />
+            <TextField
+              style={{ marginTop: '10px' }}
+              fullWidth
+              label="End date"
+              type="date"
+              InputLabelProps={{
+                shrink: true,
+              }}
+              onChange={e => {
+                const d = new Date(e.target.value);
+                setLockedEndTimestamp(d.getTime() / 1000);
+              }}
+            />
+            <TextField
+              style={{ marginTop: '10px' }}
+              fullWidth
+              label="Locked Vendor"
+              value={lockedVendor}
+              onChange={e => setLockedVendor(e.target.value)}
+            />
+            <FormHelperText>
+              Vendor account for distributing locked rewards
+            </FormHelperText>
+          </div>
+        )}
         {!isLocked && (
           <>
             <div>
-              <div style={{ display: 'flex', marginBottom: '10px', }}>
-								<div style={{ flex: 1 }}>
-									<OwnedTokenAccountsSelect
-									style={{ height: '100%' }}
-										mint={network.srm}
-										onChange={(f: PublicKey) => setSrmFromAccount(f)}
-									/>
-                    <FormHelperText>SRM account to send from</FormHelperText>
-								</div>
+              <div style={{ display: 'flex', marginBottom: '10px' }}>
+                <div style={{ flex: 1 }}>
+                  <OwnedTokenAccountsSelect
+                    style={{ height: '100%' }}
+                    mint={network.srm}
+                    onChange={(f: PublicKey) => setSrmFromAccount(f)}
+                  />
+                  <FormHelperText>SRM account to send from</FormHelperText>
+                </div>
                 <TextField
-                  style={{ width: '200px', marginLeft: '24px',  }}
+                  style={{ width: '200px', marginLeft: '24px' }}
                   id="outlined-number"
                   label="Amount"
                   type="number"
@@ -187,45 +247,45 @@ function DropRewardsDialog(props: DropRewardsDialogProps) {
                 />
               </div>
               {poolTab === PoolTabViewModel.Msrm && (
-              <div style={{ display: 'flex' }}>
-								<div style={{ flex: 1 }}>
-									<OwnedTokenAccountsSelect
-									style={{ height: '100%' }}
-										mint={network.msrm}
-										onChange={(f: PublicKey) => setMsrmFromAccount(f)}
-									/>
+                <div style={{ display: 'flex' }}>
+                  <div style={{ flex: 1 }}>
+                    <OwnedTokenAccountsSelect
+                      style={{ height: '100%' }}
+                      mint={network.msrm}
+                      onChange={(f: PublicKey) => setMsrmFromAccount(f)}
+                    />
                     <FormHelperText>MSRM account to send from</FormHelperText>
-								</div>
-                <TextField
-                  style={{ width: '200px', marginLeft: '24px',  }}
-                  id="outlined-number"
-                  label="Amount"
-                  type="number"
-                  InputLabelProps={{
-                    shrink: true,
-                  }}
-                  variant="outlined"
-                  onChange={e =>
-                    setRewardMegaAmount(parseInt(e.target.value) as number)
-                  }
-                  InputProps={{ inputProps: { min: 0 } }}
-                />
-              </div>
+                  </div>
+                  <TextField
+                    style={{ width: '200px', marginLeft: '24px' }}
+                    id="outlined-number"
+                    label="Amount"
+                    type="number"
+                    InputLabelProps={{
+                      shrink: true,
+                    }}
+                    variant="outlined"
+                    onChange={e =>
+                      setRewardMegaAmount(parseInt(e.target.value) as number)
+                    }
+                    InputProps={{ inputProps: { min: 0 } }}
+                  />
+                </div>
               )}
             </div>
           </>
         )}
-				<DialogActions>
-					<Button onClick={onClose}>Cancel</Button>
-					<Button
-						onClick={() => sendRewards()}
-						type="submit"
-						color="primary"
-						disabled={!isSendEnabled}
-					>
-						Send
-					</Button>
-				</DialogActions>
+        <DialogActions>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button
+            onClick={() => sendRewards()}
+            type="submit"
+            color="primary"
+            disabled={!isSendEnabled}
+          >
+            Send
+          </Button>
+        </DialogActions>
       </DialogContent>
     </Dialog>
   );
@@ -237,37 +297,33 @@ type RewardListItemProps = {
 
 function RewardListItem(props: RewardListItemProps) {
   const { reward } = props;
-	if (reward.poolDrop !== undefined) {
-		return <PoolDropReward poolDrop={reward.poolDrop} />
-	} else {
-		return <div> </div>
-	}
+  if (reward.poolDrop !== undefined) {
+    return <PoolDropReward poolDrop={reward.poolDrop} />;
+  } else {
+    return <div> </div>;
+  }
 }
 
 type PoolDropRewardProps = {
-	poolDrop: registry.accounts.PoolDrop;
+  poolDrop: registry.accounts.PoolDrop;
 };
 
 function PoolDropReward(props: PoolDropRewardProps) {
-	const { poolDrop } = props;
-	let amountLabel = `${poolDrop.totals[0].toString()} SRM`;
-	if (poolDrop.totals.length === 2) {
-		amountLabel += ` ${poolDrop.totals[1].toString()} MSRM`;
-	}
-	let lockedLabel = 'unlocked';
-	let fromLabel = poolDrop.from.toString();
+  const { poolDrop } = props;
+  let amountLabel = `${poolDrop.totals[0].toString()} SRM`;
+  if (poolDrop.totals.length === 2) {
+    amountLabel += ` ${poolDrop.totals[1].toString()} MSRM`;
+  }
+  let lockedLabel = 'unlocked';
+  let fromLabel = poolDrop.from.toString();
   return (
     <>
-			<ListItem>
-				<ListItemText
-				primary={
-					<>
-						{`${amountLabel} ${lockedLabel}`}
-					</>
-				}
-				secondary={fromLabel}
-				/>
-			</ListItem>
+      <ListItem>
+        <ListItemText
+          primary={<>{`${amountLabel} ${lockedLabel}`}</>}
+          secondary={fromLabel}
+        />
+      </ListItem>
     </>
   );
 }
