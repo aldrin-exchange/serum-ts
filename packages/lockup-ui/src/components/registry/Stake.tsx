@@ -30,10 +30,12 @@ import { State as StoreState, ProgramAccount } from '../../store/reducer';
 import { ActionType } from '../../store/actions';
 import EntityGallery, { EntityActivityLabel } from './EntityGallery';
 import Me from './Me';
+import Rewards from './Rewards';
 
 enum TabModel {
   Me,
   EntityGallery,
+  Rewards,
 }
 
 export default function Stake() {
@@ -44,6 +46,7 @@ export default function Stake() {
       <Container fixed maxWidth="md" style={{ flex: 1, display: 'flex' }}>
         {tab === TabModel.Me && <Me />}
         {tab === TabModel.EntityGallery && <EntityGallery />}
+        {tab === TabModel.Rewards && <Rewards />}
       </Container>
     </div>
   );
@@ -182,6 +185,7 @@ function MyNodeBanner(props: MyNodeBannerProps) {
           >
             <Tab value={TabModel.Me} label="Me" />
             <Tab value={TabModel.EntityGallery} label="Nodes" />
+            <Tab value={TabModel.Rewards} label="Rewards" />
           </Tabs>
         </div>
       </div>

@@ -1,5 +1,12 @@
 import { u8, struct, Layout } from 'buffer-layout';
-import { option, i64, publicKey, rustEnum, u64 } from '@project-serum/borsh';
+import {
+  vec,
+  option,
+  i64,
+  publicKey,
+  rustEnum,
+  u64,
+} from '@project-serum/borsh';
 import { PublicKey } from '@solana/web3.js';
 import BN from 'bn.js';
 
@@ -17,7 +24,11 @@ export type RegistryInstruction =
   | MarkGeneration
   | StartStakeWithdrawal
   | EndStakeWithdrawal
-  | CreateEntity;
+  | CreateEntity
+  | Slash
+  | DropPoolReward
+  | DropLockedReward
+  | ClaimLockedReward;
 
 type Initialize = {
   authority: PublicKey;
@@ -75,6 +86,21 @@ type StartStakeWithdrawal = {
 
 type EndStakeWithdrawal = {};
 
+type Slash = {};
+
+type DropPoolReward = {
+  totals: BN[];
+};
+
+type DropLockedReward = {
+  total: BN;
+  expiryTs: BN;
+  expiryReceiver: PublicKey;
+  lockedVendor: PublicKey;
+};
+
+type ClaimLockedReward = {};
+
 const REGISTRY_INSTRUCTION_LAYOUT: Layout<RegistryInstruction> = rustEnum([
   struct(
     [
@@ -111,6 +137,18 @@ const REGISTRY_INSTRUCTION_LAYOUT: Layout<RegistryInstruction> = rustEnum([
   struct([], 'markGeneration'),
   struct([u64('amount')], 'startStakeWithdrawal'),
   struct([], 'endStakeWithdrawal'),
+  struct([u64('amount')], 'slash'),
+  struct([vec(u64(), 'totals')], 'dropPoolReward'),
+  struct(
+    [
+      u64('total'),
+      i64('expiryTs'),
+      publicKey('expiryReceiver'),
+      publicKey('lockedVendor'),
+    ],
+    'dropLockedReward',
+  ),
+  struct([], 'claimLockedReward'),
 ]);
 
 export function decode(data: Buffer): RegistryInstruction {

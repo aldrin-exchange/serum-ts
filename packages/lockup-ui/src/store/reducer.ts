@@ -172,6 +172,9 @@ export default function reducer(
       emd.set(action.item.entityPublicKey.toString(), action.item.metadata);
       newState.registry.entityMetadata = emd;
       return newState;
+    case ActionType.RegistrySetRewardEventQueue:
+      newState.registry.rewardEventQueue = action.item.rewardEventQueue;
+      return newState;
 
     // Misc.
     default:
@@ -220,6 +223,7 @@ export type RegistryState = {
     string,
     Array<ProgramAccount<registry.accounts.PendingWithdrawal>>
   >;
+  rewardEventQueue?: ProgramAccount<registry.accounts.RewardEventQueue>;
 };
 
 export type SolanaState = {

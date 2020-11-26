@@ -712,9 +712,11 @@ export class PoolPrices {
 
   // TODO: replace these methods with `getPoolBasket` from the pool package.
   basket(sptAmount: BN, roundUp: boolean): Basket {
-    if (this.poolVault.amount.toNumber() === 0) {
+    if (this.poolTokenMint.supply.toNumber() === 0) {
       return { quantities: [new u64(sptAmount)] };
     }
+		// TODO: need to more thoughtfully handle the case where the token supply
+		//       resets *and* there exists rewards in the pool.
     return {
       quantities: [
         this.poolVault.amount
@@ -729,7 +731,7 @@ export class PoolPrices {
     if (this.megaPoolVaults.length !== 2) {
       throw new Error('invariant violation');
     }
-    if (this.megaPoolVaults[1].amount.toNumber() === 0) {
+    if (this.poolTokenMint.supply.toNumber() === 0) {
       return { quantities: [new u64(0), new u64(sptAmount)] };
     }
     const quantities = this.megaPoolVaults.map(v => {

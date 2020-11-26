@@ -63,6 +63,7 @@ export default function WalletProvider(
         stakeProgramId: network.stakeProgramId,
         metaEntityProgramId: network.metaEntityProgramId,
         registrar: network.registrar,
+				rewardEventQueue: network.rewardEventQueue,
       }),
     };
   }, [walletProvider, network]);

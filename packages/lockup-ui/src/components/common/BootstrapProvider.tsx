@@ -39,17 +39,39 @@ export default function BootstrapProvider(props: PropsWithChildren<ReactNode>) {
     }
 
     // Websocket subscriptions.
-    _slotChangeListener = lockupClient.provider.connection.onSlotChange(
-      slotInfo => {
-        dispatch({
-          type: ActionType.SolanaSlotUpdate,
-          item: {
-            slotInfo,
-          },
-        });
-      },
-    );
-
+		const startSubscriptions = () => {
+			// Slot subscription.
+			_slotChangeListener = lockupClient.provider.connection.onSlotChange(
+				slotInfo => {
+					dispatch({
+						type: ActionType.SolanaSlotUpdate,
+						item: {
+							slotInfo,
+						},
+					});
+				},
+			);
+			// Reward event queue subscription.
+			const conn = registryClient.accounts.rewardEventQueueConnect(
+				registryClient.rewardEventQueue,
+			);
+			conn.on('connected', rewardEventQueue => {
+				dispatch({
+					type: ActionType.RegistrySetRewardEventQueue,
+					item: {
+						rewardEventQueue,
+					},
+				});
+			});
+			conn.on('change', rewardEventQueue => {
+				dispatch({
+					type: ActionType.RegistrySetRewardEventQueue,
+					item: {
+						rewardEventQueue,
+					},
+				});
+			});
+		};
     const fetchEntityAccounts = async () => {
       const entityAccounts = await registryClient.accounts.allEntities();
       dispatch({
@@ -120,7 +142,7 @@ export default function BootstrapProvider(props: PropsWithChildren<ReactNode>) {
             account: poolTokenMint,
           },
           poolVault: {
-            publicKey: pool.assets[0],
+            publicKey: pool.assets[0].vaultAddress,
             account: poolVault,
           },
           megaPool: {
@@ -133,7 +155,7 @@ export default function BootstrapProvider(props: PropsWithChildren<ReactNode>) {
           },
           megaPoolVaults: megaPoolVaults.map((v, idx) => {
             return {
-              publicKey: megaPool.assets[idx],
+              publicKey: megaPool.assets[idx].vaultAddress,
               account: v,
             };
           }),
@@ -233,6 +255,7 @@ export default function BootstrapProvider(props: PropsWithChildren<ReactNode>) {
     });
 
     // Break up to avoid rate limits.
+		startSubscriptions();
     await fetchRegistrar();
     await fetchSafe();
     await fetchEntityAccounts();
@@ -270,6 +293,7 @@ export default function BootstrapProvider(props: PropsWithChildren<ReactNode>) {
       );
       _slotChangeListener = -1;
     }
+		registryClient.accounts.rewardEventQueueDisconnect();
   }, [lockupClient.provider.connection]);
 
   useEffect(() => {

@@ -31,6 +31,7 @@ export enum ActionType {
   RegistryUpdateEntity,
   RegistrySetMember,
   RegistrySetMetadata,
+  RegistrySetRewardEventQueue,
   RegistryCreateMetadata,
   RegistrySetPools,
   RegistrySetRegistrar,

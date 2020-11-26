@@ -9,3 +9,9 @@ export { Member } from './member';
 export { PendingWithdrawal } from './pending-withdrawal';
 export { Generation } from './generation';
 export { Registrar } from './registrar';
+export {
+  RewardEventQueue,
+  RewardEvent,
+  PoolDrop,
+  LockedAlloc,
+} from './reward-event-q';

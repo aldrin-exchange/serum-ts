@@ -17,6 +17,7 @@ export interface Registrar {
   pool: PublicKey;
   megaPool: PublicKey;
   poolProgramId: PublicKey;
+  rewardEventQueue: PublicKey;
 }
 
 const REGISTRAR_LAYOUT: Layout<Registrar> = struct([
@@ -32,6 +33,7 @@ const REGISTRAR_LAYOUT: Layout<Registrar> = struct([
   publicKey('pool'),
   publicKey('megaPool'),
   publicKey('poolProgramId'),
+  publicKey('rewardEventQueue'),
 ]);
 
 export function decode(data: Buffer): Registrar {
@@ -57,6 +59,7 @@ export const SIZE: number = encode({
   pool: new PublicKey(Buffer.alloc(32)),
   megaPool: new PublicKey(Buffer.alloc(32)),
   poolProgramId: new PublicKey(Buffer.alloc(32)),
+  rewardEventQueue: new PublicKey(Buffer.alloc(32)),
 }).length;
 
 export const STAKE_POOL_NAME = '';

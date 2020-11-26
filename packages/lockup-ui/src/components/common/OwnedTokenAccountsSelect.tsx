@@ -6,13 +6,14 @@ import { PublicKey } from '@solana/web3.js';
 import { State as StoreState } from '../../store/reducer';
 
 type Props = {
+	style?: any;
   mint?: PublicKey | null;
   variant?: 'outlined' | 'standard';
   onChange: (from: PublicKey) => void;
 };
 
 export default function OwnedTokenAccountsSelect(p: Props) {
-  const { mint, variant, onChange } = p;
+  const { mint, variant, onChange, style } = p;
   const ownedTokenAccounts = useSelector((state: StoreState) => {
     if (!mint) {
       return [];
@@ -24,6 +25,7 @@ export default function OwnedTokenAccountsSelect(p: Props) {
   const [fromAccount, setFromAccount] = useState('');
   return (
     <Select
+			style={style}
       variant={variant}
       fullWidth
       value={fromAccount}

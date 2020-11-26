@@ -47,8 +47,12 @@ import {
 import { PendingWithdrawal } from './accounts/pending-withdrawal';
 import { Entity } from './accounts/entity';
 import { Member } from './accounts/member';
+import { RewardEventQueue } from './accounts/reward-event-q';
 import * as metaEntity from './meta-entity';
 import EventEmitter from 'eventemitter3';
+
+// TODO: handle susbcription state within client object.
+let REWARD_Q_LISTENER = -1;
 
 type Config = {
   provider: Provider;
@@ -56,6 +60,7 @@ type Config = {
   stakeProgramId: PublicKey;
   metaEntityProgramId: PublicKey;
   registrar: PublicKey;
+  rewardEventQueue: PublicKey;
 };
 
 export default class Client {
@@ -68,6 +73,7 @@ export default class Client {
   readonly metaEntityProgramId: PublicKey;
   readonly accounts: Accounts;
   readonly registrar: PublicKey;
+  readonly rewardEventQueue: PublicKey;
 
   constructor(cfg: Config) {
     this.provider = cfg.provider;
@@ -81,6 +87,7 @@ export default class Client {
       cfg.metaEntityProgramId,
     );
     this.registrar = cfg.registrar;
+    this.rewardEventQueue = cfg.rewardEventQueue;
   }
 
   // Use this to cache a retbuf account, so that we don't have to allocate
@@ -109,6 +116,7 @@ export default class Client {
       stakeProgramId: networks.devnet.stakeProgramId,
       registrar: networks.devnet.registrar,
       metaEntityProgramId: networks.devnet.metaEntityProgramId,
+      rewardEventQueue: networks.devnet.rewardEventQueue,
     });
   }
 
@@ -136,6 +144,8 @@ export default class Client {
     if (registrar === undefined) {
       registrar = new Account();
     }
+
+    const rewardEventQueue = new Account();
     const pool = new Account();
     const megaPool = new Account();
 
@@ -188,6 +198,16 @@ export default class Client {
 
     const createTx = new Transaction();
     createTx.add(
+      // Create reward event queue.
+      SystemProgram.createAccount({
+        fromPubkey: provider.wallet.publicKey,
+        newAccountPubkey: rewardEventQueue.publicKey,
+        space: accounts.RewardEventQueue.accountSize(),
+        lamports: await provider.connection.getMinimumBalanceForRentExemption(
+          accounts.RewardEventQueue.accountSize(),
+        ),
+        programId: programId,
+      }),
       // Create registrar.
       SystemProgram.createAccount({
         fromPubkey: provider.wallet.publicKey,
@@ -261,6 +281,11 @@ export default class Client {
             isWritable: false,
             isSigner: false,
           },
+          {
+            pubkey: rewardEventQueue.publicKey,
+            isWritable: true,
+            isSigner: false,
+          },
           { pubkey: SYSVAR_RENT_PUBKEY, isWritable: false, isSigner: false },
         ],
         programId: programId,
@@ -277,7 +302,7 @@ export default class Client {
       }),
     );
 
-    const createSigners = [registrar, pool, megaPool];
+    const createSigners = [rewardEventQueue, registrar, pool, megaPool];
 
     const createTxSig = await provider.send(createTx, createSigners);
     const initTxSig = await provider.send(initTx);
@@ -288,6 +313,7 @@ export default class Client {
       programId,
       stakeProgramId,
       metaEntityProgramId,
+      rewardEventQueue: rewardEventQueue.publicKey,
     });
 
     return [
@@ -1117,10 +1143,77 @@ export default class Client {
       tx: txSig,
     };
   }
+
+  async dropReward(req: DropRewardRequest): Promise<DropRewardResponse> {
+    let {
+      pool,
+      srmDepositor,
+      msrmDepositor,
+      srmAmount,
+      msrmAmount,
+      poolSrmVault,
+      poolMsrmVault,
+    } = req;
+    let totals = [srmAmount];
+    if (msrmAmount !== undefined) {
+      totals.push(msrmAmount);
+    }
+    let depositors = [srmDepositor];
+    if (msrmDepositor !== undefined) {
+      depositors.push(msrmDepositor);
+    }
+    let poolVaults = [poolSrmVault];
+    if (poolMsrmVault !== undefined) {
+      poolVaults.push(poolMsrmVault);
+    }
+    const keys = [
+      { pubkey: this.rewardEventQueue, isWritable: true, isSigner: false },
+      { pubkey: this.registrar, isWritable: false, isSigner: false },
+    ]
+      .concat(
+        depositors.map(d => {
+          return { pubkey: d, isWritable: true, isSigner: false };
+        }),
+      )
+      .concat([
+        {
+          pubkey: this.provider.wallet.publicKey,
+          isWritable: false,
+          isSigner: true,
+        },
+        { pubkey: pool, isWritable: false, isSigner: false },
+      ])
+      .concat(
+        poolVaults.map(pv => {
+          return { pubkey: pv, isWritable: true, isSigner: false };
+        }),
+      )
+      .concat([
+        { pubkey: TOKEN_PROGRAM_ID, isWritable: false, isSigner: false },
+      ]);
+    const tx = new Transaction();
+    tx.add(
+      new TransactionInstruction({
+        keys: keys,
+        programId: this.programId,
+        data: instruction.encode({
+          dropPoolReward: {
+            totals,
+          },
+        }),
+      }),
+    );
+
+    let signers: any = [];
+    let txSig = await this.provider.send(tx, signers);
+
+    return {
+      tx: txSig,
+    };
+  }
 }
 
 class Accounts {
-  private _subscriptionId = -1;
   constructor(
     readonly provider: Provider,
     readonly registrarAddress: PublicKey,
@@ -1513,6 +1606,49 @@ class Accounts {
     );
   }
 
+  rewardEventQueueConnect(address: PublicKey): EventEmitter {
+    const ee = new EventEmitter();
+
+    let rewardEventQueue = null;
+
+    REWARD_Q_LISTENER = this.provider.connection.onAccountChange(
+      address,
+      acc => {
+        rewardEventQueue = new RewardEventQueue(acc.data);
+        ee.emit('change', {
+          publicKey: this.rewardEventQueue,
+          account: rewardEventQueue,
+        });
+      },
+      'recent',
+    );
+
+    this.rewardEventQueue(address).then(rewardEventQueue => {
+      ee.emit('connected', rewardEventQueue);
+    });
+
+    return ee;
+  }
+
+  rewardEventQueueDisconnect(): void {
+    if (REWARD_Q_LISTENER !== -1) {
+      this.provider.connection.removeAccountChangeListener(REWARD_Q_LISTENER);
+    }
+  }
+
+  async rewardEventQueue(
+    address: PublicKey,
+  ): Promise<ProgramAccount<RewardEventQueue>> {
+    const accountInfo = await this.provider.connection.getAccountInfo(address);
+    if (accountInfo === null) {
+      throw new Error(`Reward event queue dopes not exit ${address}`);
+    }
+    return {
+      publicKey: address,
+      account: new RewardEventQueue(accountInfo.data),
+    };
+  }
+
   mqueueConnect(address: PublicKey): EventEmitter {
     const ee = new EventEmitter();
 
@@ -1734,6 +1870,20 @@ type SendMessageRequest = {
 };
 
 type SendMessageResponse = {
+  tx: TransactionSignature;
+};
+
+type DropRewardRequest = {
+  pool: PublicKey;
+  srmDepositor: PublicKey;
+  msrmDepositor?: PublicKey;
+  srmAmount: BN;
+  msrmAmount?: BN;
+  poolSrmVault: PublicKey;
+  poolMsrmVault?: PublicKey;
+};
+
+type DropRewardResponse = {
   tx: TransactionSignature;
 };
 
