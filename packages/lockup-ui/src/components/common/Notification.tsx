@@ -1,11 +1,30 @@
 import React from 'react';
 import { useSelector } from 'react-redux';
+import { useSnackbar } from 'notistack';
 import Button from '@material-ui/core/Button';
+import { TransactionSignature } from '@solana/web3.js';
 import { State as StoreState } from '../../store/reducer';
 
 type Props = {
   signature: string;
 };
+
+export async function withTx(
+  snack: any,
+  beforeLabel: string,
+  afterLabel: string,
+  execTx: () => Promise<TransactionSignature>,
+) {
+  snack.enqueueSnackbar(beforeLabel, {
+    variant: 'info',
+  });
+  let tx = await execTx();
+  snack.closeSnackbar();
+  snack.enqueueSnackbar(afterLabel, {
+    variant: 'success',
+    action: <ViewTransactionOnExplorerButton signature={tx} />,
+  });
+}
 
 export function ViewTransactionOnExplorerButton(props: Props) {
   const { signature } = props;

@@ -1219,11 +1219,42 @@ export default class Client {
       expiryTs,
       expiryReceiver,
       depositor,
+      depositorMint,
       pool,
       poolTokenMint,
     } = req;
+    const lockedVendor = new Account();
+    const lockedVendorVault = new Account();
+
+    const [
+      lockedVendorVaultAuthority,
+      nonce,
+    ] = await PublicKey.findProgramAddress(
+      [this.registrar.toBuffer(), lockedVendor.publicKey.toBuffer()],
+      this.programId,
+    );
+
+    const createLockedVendorVaultInstrs = await createTokenAccountInstrs(
+      this.provider,
+      lockedVendorVault.publicKey,
+      depositorMint,
+      lockedVendorVaultAuthority,
+    );
+
     const tx = new Transaction();
     tx.add(
+      // Create LockedRewardVendor token vault.
+      ...createLockedVendorVaultInstrs,
+      // Create LockedRewardVendor account.
+      SystemProgram.createAccount({
+        fromPubkey: this.provider.wallet.publicKey,
+        newAccountPubkey: lockedVendor.publicKey,
+        lamports: await this.provider.connection.getMinimumBalanceForRentExemption(
+          accounts.lockedRewardVendor.SIZE,
+        ),
+        space: accounts.lockedRewardVendor.SIZE,
+        programId: this.programId,
+      }),
       new TransactionInstruction({
         keys: [
           { pubkey: this.rewardEventQueue, isWritable: true, isSigner: false },
@@ -1236,8 +1267,12 @@ export default class Client {
           },
           { pubkey: pool, isWritable: false, isSigner: false },
           { pubkey: poolTokenMint, isWritable: false, isSigner: false },
-          { pubkey: lockedVendor, isWritable: true, isSigner: false },
-          { pubkey: lockedVendorVault, isWritable: true, isSigner: false },
+          { pubkey: lockedVendor.publicKey, isWritable: true, isSigner: false },
+          {
+            pubkey: lockedVendorVault.publicKey,
+            isWritable: true,
+            isSigner: false,
+          },
           { pubkey: TOKEN_PROGRAM_ID, isWritable: false, isSigner: false },
         ],
         programId: this.programId,
@@ -1252,10 +1287,10 @@ export default class Client {
       }),
     );
 
-    let signers: any = [];
+    let signers: any = [lockedVendor, lockedVendorVault];
     let txSig = await this.provider.send(tx, signers);
     return {
-      tx: txSign,
+      tx: txSig,
     };
   }
 }
@@ -1939,6 +1974,7 @@ type DropLockedRewardRequest = {
   expiryTs: BN;
   expiryReceiver: PublicKey;
   depositor: PublicKey;
+  depositorMint: PublicKey;
   pool: PublicKey;
   poolTokenMint: PublicKey;
 };
