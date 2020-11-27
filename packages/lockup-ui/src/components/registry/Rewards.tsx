@@ -34,7 +34,6 @@ export default function Rewards() {
     };
   });
   const rewards = rewardEventQueue!.account.messages();
-  console.log('rewards = ', rewards);
   return (
     <div style={{ width: '100%', marginTop: '24px' }}>
         <div style={{ marginBottom: '10px', display: 'flex', justifyContent: 'space-between' }}>
@@ -164,7 +163,7 @@ function DropRewardsDialog(props: DropRewardsDialogProps) {
       variant: 'info',
     });
 
-    let { tx } = await registryClient.dropReward({
+    let { tx } = await registryClient.dropPoolReward({
       pool:
         poolTab === PoolTabViewModel.Srm ? pool.publicKey : megaPool.publicKey,
       srmDepositor: srmFromAccount as PublicKey,

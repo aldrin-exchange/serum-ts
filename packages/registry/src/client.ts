@@ -1144,7 +1144,7 @@ export default class Client {
     };
   }
 
-  async dropReward(req: DropRewardRequest): Promise<DropRewardResponse> {
+  async dropPoolReward(req: DropRewardRequest): Promise<DropRewardResponse> {
     let {
       pool,
       srmDepositor,
@@ -1166,35 +1166,34 @@ export default class Client {
     if (poolMsrmVault !== undefined) {
       poolVaults.push(poolMsrmVault);
     }
-    const keys = [
-      { pubkey: this.rewardEventQueue, isWritable: true, isSigner: false },
-      { pubkey: this.registrar, isWritable: false, isSigner: false },
-    ]
-      .concat(
-        depositors.map(d => {
-          return { pubkey: d, isWritable: true, isSigner: false };
-        }),
-      )
-      .concat([
-        {
-          pubkey: this.provider.wallet.publicKey,
-          isWritable: false,
-          isSigner: true,
-        },
-        { pubkey: pool, isWritable: false, isSigner: false },
-      ])
-      .concat(
-        poolVaults.map(pv => {
-          return { pubkey: pv, isWritable: true, isSigner: false };
-        }),
-      )
-      .concat([
-        { pubkey: TOKEN_PROGRAM_ID, isWritable: false, isSigner: false },
-      ]);
     const tx = new Transaction();
     tx.add(
       new TransactionInstruction({
-        keys: keys,
+        keys: [
+          { pubkey: this.rewardEventQueue, isWritable: true, isSigner: false },
+          { pubkey: this.registrar, isWritable: false, isSigner: false },
+        ]
+          .concat(
+            depositors.map(d => {
+              return { pubkey: d, isWritable: true, isSigner: false };
+            }),
+          )
+          .concat([
+            {
+              pubkey: this.provider.wallet.publicKey,
+              isWritable: false,
+              isSigner: true,
+            },
+            { pubkey: pool, isWritable: false, isSigner: false },
+          ])
+          .concat(
+            poolVaults.map(pv => {
+              return { pubkey: pv, isWritable: true, isSigner: false };
+            }),
+          )
+          .concat([
+            { pubkey: TOKEN_PROGRAM_ID, isWritable: false, isSigner: false },
+          ]),
         programId: this.programId,
         data: instruction.encode({
           dropPoolReward: {
@@ -1209,6 +1208,54 @@ export default class Client {
 
     return {
       tx: txSig,
+    };
+  }
+
+  async dropLockedReward(
+    req: DropLockedRewardRequest,
+  ): Promise<DropLockedRewardResponse> {
+    let {
+      total,
+      expiryTs,
+      expiryReceiver,
+      depositor,
+      pool,
+      poolTokenMint,
+    } = req;
+    const tx = new Transaction();
+    tx.add(
+      new TransactionInstruction({
+        keys: [
+          { pubkey: this.rewardEventQueue, isWritable: true, isSigner: false },
+          { pubkey: this.registrar, isWritable: false, isSigner: false },
+          { pubkey: depositor, isWritable: true, isSigner: false },
+          {
+            pubkey: this.provider.wallet.publicKey,
+            isWritable: false,
+            isSigner: false,
+          },
+          { pubkey: pool, isWritable: false, isSigner: false },
+          { pubkey: poolTokenMint, isWritable: false, isSigner: false },
+          { pubkey: lockedVendor, isWritable: true, isSigner: false },
+          { pubkey: lockedVendorVault, isWritable: true, isSigner: false },
+          { pubkey: TOKEN_PROGRAM_ID, isWritable: false, isSigner: false },
+        ],
+        programId: this.programId,
+        data: instruction.encode({
+          dropLockedReward: {
+            total,
+            expiryTs,
+            expiryReceiver,
+            nonce,
+          },
+        }),
+      }),
+    );
+
+    let signers: any = [];
+    let txSig = await this.provider.send(tx, signers);
+    return {
+      tx: txSign,
     };
   }
 }
@@ -1884,6 +1931,19 @@ type DropRewardRequest = {
 };
 
 type DropRewardResponse = {
+  tx: TransactionSignature;
+};
+
+type DropLockedRewardRequest = {
+  total: BN;
+  expiryTs: BN;
+  expiryReceiver: PublicKey;
+  depositor: PublicKey;
+  pool: PublicKey;
+  poolTokenMint: PublicKey;
+};
+
+type DropLockedRewardResponse = {
   tx: TransactionSignature;
 };
 
