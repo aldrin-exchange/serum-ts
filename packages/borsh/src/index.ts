@@ -10,6 +10,7 @@ import {
 } from 'buffer-layout';
 import { PublicKey } from '@solana/web3.js';
 import BN from 'bn.js';
+export { u8, u32, struct } from 'buffer-layout';
 
 export interface Layout<T> {
   span: number;
@@ -60,6 +61,14 @@ export function u64(property?: string): Layout<BN> {
 
 export function i64(property?: string): Layout<BN> {
   return new BNLayout(8, true, property);
+}
+
+export function u128(property?: string): Layout<BN> {
+  return new BNLayout(16, false, property);
+}
+
+export function i128(property?: string): Layout<BN> {
+  return new BNLayout(16, true, property);
 }
 
 class WrappedLayout<T, U> extends LayoutCls<U> {
@@ -234,10 +243,14 @@ export function str(property?: string): Layout<string> {
   );
 }
 
+export interface EnumLayout<T> extends Layout<T> {
+  registry: Record<string, Layout<any>>;
+}
+
 export function rustEnum<T>(
   variants: Layout<any>[],
   property?: string,
-): Layout<T> {
+): EnumLayout<T> {
   const unionLayout = union(u8(), property);
   variants.forEach((variant, index) =>
     unionLayout.addVariant(index, variant, variant.property),

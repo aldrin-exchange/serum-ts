@@ -20,15 +20,15 @@ import {
   DEFAULT_LIQUIDITY_TOKEN_PRECISION,
   depositInstruction,
   getProgramVersion,
-  parseMintData,
   parseTokenAccount,
-  PROGRAM_ID,
   SWAP_PROGRAM_OWNER_FEE_ADDRESS,
   swapInstruction,
   TOKEN_PROGRAM_ID,
-  TokenSwapLayout,
   withdrawInstruction,
   WRAPPED_SOL_MINT,
+  LATEST_VERSION,
+  getLayoutForProgramId,
+  deserializeMint, PROGRAM_ID,
 } from './instructions';
 import { PoolConfig, PoolOptions, TokenAccount } from './types';
 import { divideBnToNumber, timeMs } from './utils';
@@ -63,16 +63,10 @@ export class Pool {
     this._decoded = decoded;
     this._poolAccount = poolAccount;
     this._programId = programId;
-    this._tokenMints = [
-      new PublicKey(decoded.mintA),
-      new PublicKey(decoded.mintB),
-    ];
-    this._holdingAccounts = [
-      new PublicKey(decoded.tokenAccountA),
-      new PublicKey(decoded.tokenAccountB),
-    ];
-    this._poolTokenMint = new PublicKey(decoded.tokenPool);
-    this._feeAccount = new PublicKey(decoded.feeAccount);
+    this._tokenMints = [decoded.mintA, decoded.mintB];
+    this._holdingAccounts = [decoded.tokenAccountA, decoded.tokenAccountB];
+    this._poolTokenMint = decoded.tokenPool;
+    this._feeAccount = decoded.feeAccount;
     this._skipPreflight = skipPreflight;
     this._commitment = commitment;
     this._mintAccountsCache = {};
@@ -89,7 +83,8 @@ export class Pool {
       await connection.getAccountInfo(address),
       'Pool not found',
     );
-    const decoded = TokenSwapLayout.decode(account.data);
+    const layout = getLayoutForProgramId(programId);
+    const decoded = layout.decode(account.data);
     return new Pool(decoded, address, programId, options);
   }
 
@@ -103,6 +98,14 @@ export class Pool {
 
   get programVersion(): number {
     return getProgramVersion(this._programId);
+  }
+
+  get isLatest(): boolean {
+    return getProgramVersion(this._programId) === LATEST_VERSION;
+  }
+
+  get poolTokenMint(): PublicKey {
+    return this._poolTokenMint;
   }
 
   async cached<T>(
@@ -194,7 +197,11 @@ export class Pool {
       const accountRentExempt = await connection.getMinimumBalanceForRentExemption(
         AccountLayout.span,
       );
-      const { account, instructions, cleanUpInstructions } = createTokenAccount(
+      const {
+        account,
+        instructions: createWrappedSolInstructions,
+        cleanUpInstructions: removeWrappedSolInstructions,
+      } = createTokenAccount(
         ownerAddress,
         ownerAddress,
         WRAPPED_SOL_MINT,
@@ -202,8 +209,8 @@ export class Pool {
       );
       tokenAccountA = account.publicKey;
       signers.push(account);
-      instructions.concat(instructions);
-      cleanUpInstructions.concat(cleanUpInstructions);
+      instructions.push(...createWrappedSolInstructions);
+      cleanUpInstructions.push(...removeWrappedSolInstructions)
     } else {
       tokenAccountA = tokenAccounts.find(a =>
         a.info.mint.equals(accountA.info.mint),
@@ -213,7 +220,11 @@ export class Pool {
       const accountRentExempt = await connection.getMinimumBalanceForRentExemption(
         AccountLayout.span,
       );
-      const { account, instructions, cleanUpInstructions } = createTokenAccount(
+      const {
+        account,
+        instructions: createWrappedSolInstructions,
+        cleanUpInstructions: removeWrappedSolInstructions,
+      } = createTokenAccount(
         ownerAddress,
         ownerAddress,
         WRAPPED_SOL_MINT,
@@ -221,8 +232,8 @@ export class Pool {
       );
       tokenAccountB = account.publicKey;
       signers.push(account);
-      instructions.concat(instructions);
-      cleanUpInstructions.concat(cleanUpInstructions);
+      instructions.push(...createWrappedSolInstructions);
+      cleanUpInstructions.push(...removeWrappedSolInstructions)
     } else {
       tokenAccountB = tokenAccounts.find(a =>
         a.info.mint.equals(accountB.info.mint),
@@ -237,21 +248,24 @@ export class Pool {
       `Token account for mint ${accountB.info.mint.toBase58()} not provided`,
     );
 
-    instructions.push(
-      Token.createApproveInstruction(
-        TOKEN_PROGRAM_ID,
-        poolAccount.pubkey,
-        authority,
-        ownerAddress,
-        [],
-        liquidityAmount,
-      ),
+    const transferAuthority = approveTransfer(
+      instructions,
+      cleanUpInstructions,
+      poolAccount.pubkey,
+      ownerAddress,
+      liquidityAmount,
+      this.isLatest ? undefined : authority,
     );
+
+    if (this.isLatest) {
+      signers.push(transferAuthority);
+    }
 
     instructions.push(
       withdrawInstruction(
         this._poolAccount,
         authority,
+        transferAuthority.publicKey,
         this._poolTokenMint,
         this._feeAccount,
         poolAccount.pubkey,
@@ -401,32 +415,32 @@ export class Pool {
     }
 
     // create approval for transfer transactions
-    instructions.push(
-      Token.createApproveInstruction(
-        TOKEN_PROGRAM_ID,
-        fromKeyA,
-        authority,
-        ownerAddress,
-        [],
-        amount0,
-      ),
+    const transferAuthority = approveTransfer(
+      instructions,
+      cleanupInstructions,
+      fromKeyA,
+      ownerAddress,
+      amount0,
+      this.isLatest ? undefined : authority,
     );
+    if (this.isLatest) {
+      signers.push(transferAuthority);
+    }
 
-    instructions.push(
-      Token.createApproveInstruction(
-        TOKEN_PROGRAM_ID,
-        fromKeyB,
-        authority,
-        ownerAddress,
-        [],
-        amount1,
-      ),
+    approveTransfer(
+      instructions,
+      cleanupInstructions,
+      fromKeyB,
+      ownerAddress,
+      amount1,
+      this.isLatest ? transferAuthority.publicKey : authority,
     );
 
     instructions.push(
       depositInstruction(
         this._poolAccount,
         authority,
+        transferAuthority.publicKey,
         fromKeyA,
         fromKeyB,
         this._holdingAccounts[0],
@@ -536,28 +550,31 @@ export class Pool {
     }
 
     // create approval for transfer transactions
-    const approveInstruction = Token.createApproveInstruction(
-      TOKEN_PROGRAM_ID,
+    const transferAuthority = approveTransfer(
+      instructions,
+      cleanupInstructions,
       fromAccount,
-      authority,
       ownerAddress,
-      [],
       amountIn,
+      this.isLatest ? undefined : authority,
     );
-    instructions.push(approveInstruction);
+    if (this.isLatest) {
+      signers.push(transferAuthority);
+    }
 
     // swap
     instructions.push(
       swapInstruction(
         this._poolAccount,
         authority,
+        transferAuthority.publicKey,
         fromAccount,
         holdingA,
         holdingB,
         toAccount,
         this._poolTokenMint,
         this._feeAccount,
-        PROGRAM_ID,
+        this._programId,
         TOKEN_PROGRAM_ID,
         amountIn,
         minAmountOut,
@@ -606,8 +623,12 @@ export class Pool {
     );
   }
 
+  /**
+   * Note: for seed param, this must be <= 32 characters for the txn to succeed
+   */
   static async makeInitializePoolTransaction<T extends PublicKey | Account>(
     connection: Connection,
+    tokenSwapProgram: PublicKey,
     owner: T,
     componentMints: PublicKey[],
     sourceTokenAccounts: {
@@ -617,6 +638,11 @@ export class Pool {
     }[],
     options: PoolConfig,
     liquidityTokenPrecision = DEFAULT_LIQUIDITY_TOKEN_PRECISION,
+    accounts?: {
+      liquidityTokenMint?: Account;
+      tokenSwapPoolAddress?: Account;
+    },
+    seed?: string,
   ): Promise<{
     initializeAccountsTransaction: Transaction;
     initializeAccountsSigners: Account[];
@@ -628,7 +654,9 @@ export class Pool {
     const initializeAccountsInstructions: TransactionInstruction[] = [];
     const initializeAccountsSigners: Account[] = [];
 
-    const liquidityTokenMintAccount = new Account();
+    const liquidityTokenMintAccount = accounts?.liquidityTokenMint
+      ? accounts.liquidityTokenMint
+      : new Account();
     initializeAccountsInstructions.push(
       SystemProgram.createAccount({
         fromPubkey: ownerAddress,
@@ -641,11 +669,23 @@ export class Pool {
       }),
     );
     initializeAccountsSigners.push(liquidityTokenMintAccount);
+    let tokenSwapAccountPubkey;
+    let tokenSwapAccountSigner;
+    if (accounts?.tokenSwapPoolAddress) {
+      tokenSwapAccountPubkey = accounts.tokenSwapPoolAddress.publicKey;
+      tokenSwapAccountSigner = accounts.tokenSwapPoolAddress;
+    } else if (seed) {
+      // Only works when owner is of type Account
+      tokenSwapAccountSigner = owner;
+      tokenSwapAccountPubkey = await PublicKey.createWithSeed(ownerAddress, seed, tokenSwapProgram);
+    } else {
+      tokenSwapAccountSigner = new Account();
+      tokenSwapAccountPubkey = tokenSwapAccountSigner.pubkey;
+    }
 
-    const tokenSwapAccount = new Account();
     const [authority, nonce] = await PublicKey.findProgramAddress(
-      [tokenSwapAccount.publicKey.toBuffer()],
-      PROGRAM_ID,
+      [tokenSwapAccountPubkey.toBuffer()],
+      tokenSwapProgram,
     );
 
     // create mint for pool liquidity token
@@ -707,17 +747,31 @@ export class Pool {
     const initializePoolInstructions: TransactionInstruction[] = [];
     const cleanupInstructions: TransactionInstruction[] = [];
 
-    initializePoolInstructions.push(
-      SystemProgram.createAccount({
+    let initializeTokenSwapAccountInstruction;
+    if (seed) {
+      initializeTokenSwapAccountInstruction = SystemProgram.createAccountWithSeed({
         fromPubkey: ownerAddress,
-        newAccountPubkey: tokenSwapAccount.publicKey,
+        basePubkey: ownerAddress,
+        newAccountPubkey: tokenSwapAccountPubkey,
+        seed: seed,
         lamports: await connection.getMinimumBalanceForRentExemption(
-          TokenSwapLayout.span,
+          getLayoutForProgramId(tokenSwapProgram).span
         ),
-        space: TokenSwapLayout.span,
-        programId: PROGRAM_ID,
-      }),
-    );
+        space: getLayoutForProgramId(tokenSwapProgram).span,
+        programId: tokenSwapProgram,
+      });
+    } else {
+      initializeTokenSwapAccountInstruction = SystemProgram.createAccount({
+        fromPubkey: ownerAddress,
+        newAccountPubkey: tokenSwapAccountPubkey,
+        lamports: await connection.getMinimumBalanceForRentExemption(
+          getLayoutForProgramId(tokenSwapProgram).span,
+        ),
+        space: getLayoutForProgramId(tokenSwapProgram).span,
+        programId: tokenSwapProgram,
+      })
+    }
+    initializePoolInstructions.push(initializeTokenSwapAccountInstruction);
 
     sourceTokenAccounts.forEach(({ mint, tokenAccount, amount }) => {
       let wrappedAccount: PublicKey;
@@ -754,7 +808,7 @@ export class Pool {
 
     initializePoolInstructions.push(
       createInitSwapInstruction(
-        tokenSwapAccount,
+        tokenSwapAccountPubkey,
         authority,
         holdingAccounts[sourceTokenAccounts[0].mint.toBase58()].publicKey,
         holdingAccounts[sourceTokenAccounts[1].mint.toBase58()].publicKey,
@@ -762,18 +816,12 @@ export class Pool {
         feeAccount.publicKey,
         depositorAccount.publicKey,
         TOKEN_PROGRAM_ID,
-        PROGRAM_ID,
+        tokenSwapProgram,
         nonce,
-        options.curveType,
-        options.tradeFeeNumerator,
-        options.tradeFeeDenominator,
-        options.ownerTradeFeeNumerator,
-        options.ownerTradeFeeDenominator,
-        options.ownerWithdrawFeeNumerator,
-        options.ownerWithdrawFeeDenominator,
+        options,
       ),
     );
-    initializePoolSigners.push(tokenSwapAccount);
+    initializePoolSigners.push(tokenSwapAccountSigner);
     const initializePoolTransaction = new Transaction();
     initializePoolTransaction.add(
       ...initializePoolInstructions,
@@ -789,6 +837,7 @@ export class Pool {
 
   static async initializePool(
     connection: Connection,
+    tokenSwapProgram: PublicKey,
     owner: Account,
     componentMints: PublicKey[],
     sourceTokenAccounts: {
@@ -808,6 +857,7 @@ export class Pool {
       initializePoolSigners,
     } = await Pool.makeInitializePoolTransaction(
       connection,
+      tokenSwapProgram,
       owner,
       componentMints,
       sourceTokenAccounts,
@@ -836,6 +886,60 @@ export class Pool {
     );
   }
 
+  async removeLiquidity(
+    connection: Connection,
+    owner: Account,
+    liquidityAmount: number,
+    poolAccount: TokenAccount,
+    tokenAccounts: TokenAccount[],
+    skipPreflight = true,
+    commitment: Commitment = 'single',
+  ): Promise<string> {
+    const { transaction, signers } = await this.makeRemoveLiquidityTransaction(
+      connection,
+      owner,
+      liquidityAmount,
+      poolAccount,
+      tokenAccounts,
+    );
+    return await sendTransaction(
+      connection,
+      transaction,
+      [owner, ...signers],
+      skipPreflight,
+      commitment,
+    );
+  }
+
+  async addLiquidity(
+    connection: Connection,
+    owner: Account,
+    sourceTokenAccounts: {
+      mint: PublicKey;
+      tokenAccount: PublicKey;
+      amount: number; // note this is raw amount, not decimal
+    }[],
+    poolTokenAccount?: PublicKey,
+    slippageTolerance?: number,
+    skipPreflight = true,
+    commitment: Commitment = 'single',
+  ): Promise<string> {
+    const { transaction, signers } = await this.makeAddLiquidityTransaction(
+      connection,
+      owner,
+      sourceTokenAccounts,
+      poolTokenAccount,
+      slippageTolerance,
+    );
+    return await sendTransaction(
+      connection,
+      transaction,
+      [owner, ...signers],
+      skipPreflight,
+      commitment,
+    );
+  }
+
   async getHoldings(
     connection: Connection,
   ): Promise<{ account: PublicKey; mint: PublicKey; holding: u64 }[]> {
@@ -856,21 +960,52 @@ export class Pool {
     tradeFee: number;
     ownerFee: number;
     withdrawFee: number;
+    hostFee?: number;
   } {
-    return {
-      tradeFee: divideBnToNumber(
-        new BN(this._decoded.tradeFeeNumerator, 'le'),
-        new BN(this._decoded.tradeFeeDenominator, 'le'),
-      ),
-      ownerFee: divideBnToNumber(
-        new BN(this._decoded.ownerTradeFeeNumerator, 'le'),
-        new BN(this._decoded.ownerTradeFeeDenominator, 'le'),
-      ),
-      withdrawFee: divideBnToNumber(
-        new BN(this._decoded.ownerWithdrawFeeNumerator, 'le'),
-        new BN(this._decoded.ownerWithdrawFeeDenominator, 'le'),
-      ),
-    };
+    if (this.programVersion !== 2) {
+      return {
+        tradeFee: divideBnToNumber(
+          new BN(this._decoded.tradeFeeNumerator, 'le'),
+          new BN(this._decoded.tradeFeeDenominator, 'le'),
+        ),
+        ownerFee: divideBnToNumber(
+          new BN(this._decoded.ownerTradeFeeNumerator, 'le'),
+          new BN(this._decoded.ownerTradeFeeDenominator, 'le'),
+        ),
+        withdrawFee: divideBnToNumber(
+          new BN(this._decoded.ownerWithdrawFeeNumerator, 'le'),
+          new BN(this._decoded.ownerWithdrawFeeDenominator, 'le'),
+        ),
+      };
+    } else {
+      let withdrawalFee;
+      if (
+        this._decoded.fees.ownerWithdrawFeeNumerator != 0 &&
+        this._decoded.fees.ownerWithdrawFeeDenominator != 0
+      ) {
+        withdrawalFee = divideBnToNumber(
+          new BN(this._decoded.fees.ownerWithdrawFeeNumerator, 'le'),
+          new BN(this._decoded.fees.ownerWithdrawFeeDenominator, 'le'),
+        );
+      } else {
+        withdrawalFee = 0;
+      }
+      return {
+        tradeFee: divideBnToNumber(
+          new BN(this._decoded.fees.tradeFeeNumerator, 'le'),
+          new BN(this._decoded.fees.tradeFeeDenominator, 'le'),
+        ),
+        ownerFee: divideBnToNumber(
+          new BN(this._decoded.fees.ownerTradeFeeNumerator, 'le'),
+          new BN(this._decoded.fees.ownerTradeFeeDenominator, 'le'),
+        ),
+        withdrawFee: withdrawalFee,
+        hostFee: divideBnToNumber(
+          new BN(this._decoded.fees.hostFeeNumerator, 'le'),
+          new BN(this._decoded.fees.hostFeeDenominator, 'le'),
+        ),
+      };
+    }
   }
 }
 
@@ -900,7 +1035,7 @@ export const getMintAccount = async (
   if (info === null) {
     throw new Error('Failed to find mint account');
   }
-  return parseMintData(info.data);
+  return deserializeMint(info.data);
 };
 
 export const getTokenAccount = async (
@@ -918,6 +1053,35 @@ export const getTokenAccount = async (
     account: info,
     info: accountInfo,
   };
+};
+
+export const approveTransfer = (
+  instructions: TransactionInstruction[],
+  cleanupInstructions: TransactionInstruction[],
+  account: PublicKey,
+  owner: PublicKey,
+  amount: number,
+
+  // if delegate is not passed ephemeral transfer authority is used
+  delegate?: PublicKey,
+) => {
+  const transferAuthority = new Account();
+  instructions.push(
+    Token.createApproveInstruction(
+      TOKEN_PROGRAM_ID,
+      account,
+      delegate ?? transferAuthority.publicKey,
+      owner,
+      [],
+      amount,
+    ),
+  );
+
+  cleanupInstructions.push(
+    Token.createRevokeInstruction(TOKEN_PROGRAM_ID, account, owner, []),
+  );
+
+  return transferAuthority;
 };
 
 export const createTokenAccount = (

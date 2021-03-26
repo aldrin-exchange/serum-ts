@@ -6,6 +6,8 @@ export {
   SETTLE_FUNDS_QUOTE_WALLET_INDEX,
   NEW_ORDER_OPEN_ORDERS_INDEX,
   NEW_ORDER_OWNER_INDEX,
+  NEW_ORDER_V3_OPEN_ORDERS_INDEX,
+  NEW_ORDER_V3_OWNER_INDEX,
 } from './instructions';
 export { getFeeTier, getFeeRates, supportsSrmFeeDiscounts } from './fees';
 export { TOKEN_MINTS, MARKETS, getLayoutVersion } from './tokens_and_markets';
@@ -16,3 +18,4 @@ export {
   EVENT_QUEUE_LAYOUT,
 } from './queue';
 export * as TokenInstructions from './token-instructions';
+export * from './error';

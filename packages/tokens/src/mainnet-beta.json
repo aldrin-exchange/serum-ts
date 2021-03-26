@@ -42,10 +42,16 @@
     "icon": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ripple/info/logo.png"
   },
   {
-    "tokenSymbol": "USDT",
+    "tokenSymbol": "WUSDT",
     "mintAddress": "BQcdHdAQW1hczDbBi9hiegXAR7A98Q9jx3X3iBBBDiq4",
     "tokenName": "Wrapped USDT",
     "icon": "https://raw.githubusercontent.com/trustwallet/assets/f3ffd0b9ae2165336279ce2f8db1981a55ce30f8/blockchains/ethereum/assets/0xdAC17F958D2ee523a2206206994597C13D831ec7/logo.png"
+  },
+  {
+    "tokenSymbol": "USDT",
+    "mintAddress": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+    "tokenName": "USDT",
+    "icon": "https://cdn.jsdelivr.net/gh/solana-labs/explorer/public/tokens/usdt.svg"
   },
   {
     "tokenSymbol": "SUSHI",
@@ -165,5 +171,22 @@
     "tokenSymbol": "SWAG",
     "mintAddress": "9F9fNTT6qwjsu4X4yWYKZpsbw5qT7o6yR2i57JF2jagy",
     "tokenName": "Wrapped SWAG"
+  },
+  {
+    "tokenSymbol": "FIDA",
+    "mintAddress": "EchesyfXePKdLtoiZSL8pBe8Myagyy8ZRqsACNCFGnvp",
+    "tokenName": "Bonfida",
+    "icon": "https://raw.githubusercontent.com/dr497/awesome-serum-markets/02ce7c74fd2e9bd4cb55a15f735fc3ad0e7335f6/icons/fida.svg"
+  },
+  {
+    "tokenSymbol": "KIN",
+    "mintAddress": "kinXdEcpDQeHPEuQnqmUgtYykqKGVFq6CeVX5iAHJq6",
+    "tokenName": "KIN",
+    "icon": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/kin/info/logo.png"
+  },
+  {
+    "tokenSymbol": "MAPS",
+    "mintAddress": "MAPS41MDahZ9QdKXhVa4dWB9RuyfV4XqhyAZ8XcYepb",
+    "tokenName": "MAPS"
   }
 ]
