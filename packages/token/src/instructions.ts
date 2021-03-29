@@ -76,10 +76,10 @@ export const TokenInstructionLayout: EnumLayout<TokenInstructionLayout> = rustEn
     struct([u64('amount'), u8('decimals')], 'burnChecked'),
   ],
 );
-
-const instructionMaxSpan = Math.max(
+///HACK: instructionMaxSpan value should be calculated given the provided layouts 
+const instructionMaxSpan = 67;/*Math.max(
   ...Object.values(TokenInstructionLayout.registry).map(r => r.span),
-);
+);*/
 
 function encodeTokenInstructionData(instruction: TokenInstructionLayout) {
   const b = Buffer.alloc(instructionMaxSpan);

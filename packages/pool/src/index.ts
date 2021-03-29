@@ -62,7 +62,7 @@ export async function getPoolBasket(
   pool: PoolInfo,
   action: PoolAction,
   payer: PublicKey = new PublicKey(
-    'H6WR1VVoiwWz1GMSBALwUNNazvE7UhAZEjaYTTSwvV8D',
+    process.env.DEFAULT_PAYER_ADDRESS?process.env.DEFAULT_PAYER_ADDRESS:'H6WR1VVoiwWz1GMSBALwUNNazvE7UhAZEjaYTTSwvV8D',
   ),
 ): Promise<Basket> {
   const { transaction } = PoolTransactions.getBasket(pool, action, payer);

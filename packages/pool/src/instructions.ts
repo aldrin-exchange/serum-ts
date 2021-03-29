@@ -33,11 +33,11 @@ export interface UserInfo {
 
 export const RETBUF_PROGRAM_ID = new PublicKey(
   // TODO: switch to shmem4EWT2sPdVGvTZCzXXRAURL9G5vpPxNwSeKhHUL once that exists on mainnet
-  'BYVBQ71CYArTNbEpDnsPCjcoWkJL9181xvj52kfyFFHg',
+  process.env.SHARED_MEMORY_PROGRAM_ID?process.env.SHARED_MEMORY_PROGRAM_ID:'BYVBQ71CYArTNbEpDnsPCjcoWkJL9181xvj52kfyFFHg',
 );
 
 export const LQD_FEE_OWNER_ADDRESS = new PublicKey(
-  '3LTvJCPiPSMjX1kBJ6ZfEhn4G2hM46aJ1yEZsk8i12TK',
+  process.env.LIQUIDITY_FEE_OWNER_ADDRESS?process.env.LIQUIDITY_FEE_OWNER_ADDRESS:'3LTvJCPiPSMjX1kBJ6ZfEhn4G2hM46aJ1yEZsk8i12TK',
 );
 
 /**
