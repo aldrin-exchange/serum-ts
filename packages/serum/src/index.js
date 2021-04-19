@@ -1,4 +1,5 @@
-export { Market, Orderbook, OpenOrders } from './market';
+export { Market } from './market';
+export { Orderbook, OpenOrders } from "./base-market"
 export {
   DexInstructions,
   decodeInstruction,

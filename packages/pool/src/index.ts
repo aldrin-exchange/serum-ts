@@ -15,6 +15,10 @@ export {
   AdminControlledPoolInstructions,
   isAdminControlledPool,
 } from './admin-controlled-pool';
+export {
+  AdminAlertPoolInstructions,
+  isAdminAlertPool,
+} from './admin-alert-pool';
 
 /**
  * Load and decode pool state.

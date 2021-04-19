@@ -46,6 +46,8 @@
     "trailingComma": "all"
   },
   "dependencies": {
+    "@project-serum/pool": "^0.2.3",
+    "@project-serum/token": "^0.0.1-alpha.3",
     "@solana/web3.js": "^0.90.0",
     "bn.js": "^5.1.2",
     "buffer-layout": "^1.2.0"
