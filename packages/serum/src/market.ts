@@ -1,14 +1,3 @@
-import { blob, seq, struct, u8 } from 'buffer-layout';
-import {
-  accountFlagsLayout,
-  publicKeyLayout,
-  selfTradeBehaviorLayout,
-  u128,
-  u64,
-} from './layout';
-import { Slab, SLAB_LAYOUT } from './slab';
-import { DexInstructions } from './instructions';
-import BN from 'bn.js';
 import {
   Account,
   AccountInfo,
@@ -19,11 +8,16 @@ import {
   SystemProgram,
   Transaction,
   TransactionInstruction,
-  TransactionSignature,
+  TransactionSignature
 } from '@solana/web3.js';
-import { decodeEventQueue, decodeRequestQueue } from './queue';
+import BN from 'bn.js';
 import { Buffer } from 'buffer';
+import { blob, seq, struct, u8 } from 'buffer-layout';
 import { getFeeTier, supportsSrmFeeDiscounts } from './fees';
+import { DexInstructions } from './instructions';
+import { accountFlagsLayout, publicKeyLayout, u128, u64 } from './layout';
+import { decodeEventQueue, decodeRequestQueue } from './queue';
+import { Slab, SLAB_LAYOUT } from './slab';
 import {
   closeAccount,
   initializeAccount,
@@ -32,7 +26,7 @@ import {
   SRM_DECIMALS,
   SRM_MINT,
   TOKEN_PROGRAM_ID,
-  WRAPPED_SOL_MINT,
+  WRAPPED_SOL_MINT
 } from './token-instructions';
 import { getLayoutVersion } from './tokens_and_markets';
 
@@ -72,7 +66,7 @@ export const _MARKET_STAT_LAYOUT_V1 = struct([
   blob(7),
 ]);
 
-export const _MARKET_STATE_LAYOUT_V2 = struct([
+export const MARKET_STATE_LAYOUT_V2 = struct([
   blob(5),
 
   accountFlagsLayout('accountFlags'),
@@ -110,6 +104,50 @@ export const _MARKET_STATE_LAYOUT_V2 = struct([
   blob(7),
 ]);
 
+export const MARKET_STATE_LAYOUT_V3 = struct([
+  blob(5),
+
+  accountFlagsLayout('accountFlags'),
+
+  publicKeyLayout('ownAddress'),
+
+  u64('vaultSignerNonce'),
+
+  publicKeyLayout('baseMint'),
+  publicKeyLayout('quoteMint'),
+
+  publicKeyLayout('baseVault'),
+  u64('baseDepositsTotal'),
+  u64('baseFeesAccrued'),
+
+  publicKeyLayout('quoteVault'),
+  u64('quoteDepositsTotal'),
+  u64('quoteFeesAccrued'),
+
+  u64('quoteDustThreshold'),
+
+  publicKeyLayout('requestQueue'),
+  publicKeyLayout('eventQueue'),
+
+  publicKeyLayout('bids'),
+  publicKeyLayout('asks'),
+
+  u64('baseLotSize'),
+  u64('quoteLotSize'),
+
+  u64('feeRateBps'),
+
+  u64('referrerRebatesAccrued'),
+
+  publicKeyLayout('authority'),
+  publicKeyLayout('pruneAuthority'),
+  publicKeyLayout('consumeEventsAuthority'),
+
+  blob(992),
+
+  blob(7),
+]);
+
 export class Market {
   private _decoded: any;
   private _baseSplTokenDecimals: number;
@@ -120,6 +158,7 @@ export class Market {
   private _openOrdersAccountsCache: {
     [publickKey: string]: { accounts: OpenOrders[]; ts: number };
   };
+  private _layoutOverride?: any;
 
   private _feeDiscountKeysCache: {
     [publicKey: string]: {
@@ -139,6 +178,7 @@ export class Market {
     quoteMintDecimals: number,
     options: MarketOptions = {},
     programId: PublicKey,
+    layoutOverride?: any,
   ) {
     const { skipPreflight = false, commitment = 'recent' } = options;
     if (!decoded.accountFlags.initialized || !decoded.accountFlags.market) {
@@ -152,13 +192,14 @@ export class Market {
     this._programId = programId;
     this._openOrdersAccountsCache = {};
     this._feeDiscountKeysCache = {};
+    this._layoutOverride = layoutOverride;
   }
 
   static getLayout(programId: PublicKey) {
     if (getLayoutVersion(programId) === 1) {
       return _MARKET_STAT_LAYOUT_V1;
     }
-    return _MARKET_STATE_LAYOUT_V2;
+    return MARKET_STATE_LAYOUT_V2;
   }
 
   static async findAccountsByMints(
@@ -189,6 +230,7 @@ export class Market {
     address: PublicKey,
     options: MarketOptions = {},
     programId: PublicKey,
+    layoutOverride?: any,
   ) {
     const { owner, data } = throwIfNull(
       await connection.getAccountInfo(address),
@@ -197,7 +239,7 @@ export class Market {
     if (!owner.equals(programId)) {
       throw new Error('Address not owned by program: ' + owner.toBase58());
     }
-    const decoded = this.getLayout(programId).decode(data);
+    const decoded = (layoutOverride ?? this.getLayout(programId)).decode(data);
     if (
       !decoded.accountFlags.initialized ||
       !decoded.accountFlags.market ||
@@ -215,6 +257,7 @@ export class Market {
       quoteMintDecimals,
       options,
       programId,
+      layoutOverride,
     );
   }
 
@@ -244,6 +287,10 @@ export class Market {
 
   get asksAddress(): PublicKey {
     return this._decoded.asks;
+  }
+
+  get decoded(): any {
+    return this._decoded;
   }
 
   async loadBids(connection: Connection): Promise<Orderbook> {
@@ -371,6 +418,29 @@ export class Market {
     return openOrdersAccountsForOwner;
   }
 
+  async replaceOrders(
+    connection: Connection,
+    accounts: OrderParamsAccounts,
+    orders: OrderParamsBase[],
+    cacheDurationMs = 0,
+  ) {
+    if (!accounts.openOrdersAccount && !accounts.openOrdersAddressKey) {
+      const ownerAddress: PublicKey = accounts.owner.publicKey ?? accounts.owner;
+      const openOrdersAccounts = await this.findOpenOrdersAccountsForOwner(
+        connection,
+        ownerAddress,
+        cacheDurationMs,
+      );
+      accounts.openOrdersAddressKey = openOrdersAccounts[0].address;
+    }
+
+    const transaction = new Transaction();
+    transaction.add(this.makeReplaceOrdersByClientIdsInstruction(accounts, orders));
+    return await this._sendTransaction(connection, transaction, [
+      accounts.owner,
+    ]);
+  }
+
   async placeOrder(
     connection: Connection,
     {
@@ -384,12 +454,13 @@ export class Market {
       openOrdersAddressKey,
       openOrdersAccount,
       feeDiscountPubkey,
+      maxTs,
+      replaceIfExists = false,
     }: OrderParams,
   ) {
-    const {
-      transaction,
-      signers,
-    } = await this.makePlaceOrderTransaction<Account>(connection, {
+    const { transaction, signers } = await this.makePlaceOrderTransaction<
+      Account
+    >(connection, {
       owner,
       payer,
       side,
@@ -400,10 +471,50 @@ export class Market {
       openOrdersAddressKey,
       openOrdersAccount,
       feeDiscountPubkey,
+      maxTs,
+      replaceIfExists,
     });
     return await this._sendTransaction(connection, transaction, [
       owner,
       ...signers,
+    ]);
+  }
+
+  async sendTake(
+    connection: Connection,
+    {
+      owner,
+      baseWallet,
+      quoteWallet,
+      side,
+      price,
+      maxBaseSize,
+      maxQuoteSize,
+      minBaseSize,
+      minQuoteSize,
+      limit = 65535,
+      programId = undefined,
+      feeDiscountPubkey = undefined,
+    }: SendTakeParams,
+  ) {
+    const { transaction, signers } = await this.makeSendTakeTransaction<Account>(
+      connection, {
+      owner,
+      baseWallet,
+      quoteWallet,
+      side,
+      price,
+      maxBaseSize,
+      maxQuoteSize,
+      minBaseSize,
+      minQuoteSize,
+      limit,
+      programId,
+      feeDiscountPubkey,
+    });
+    return await this._sendTransaction(connection, transaction, [
+      owner,
+      ...signers
     ]);
   }
 
@@ -553,6 +664,8 @@ export class Market {
       openOrdersAccount,
       feeDiscountPubkey = undefined,
       selfTradeBehavior = 'decrementTake',
+      maxTs,
+      replaceIfExists = false,
     }: OrderParams<T>,
     cacheDurationMs = 0,
     feeDiscountPubkeyCacheDurationMs = 0,
@@ -668,6 +781,8 @@ export class Market {
       openOrdersAddressKey: openOrdersAddress,
       feeDiscountPubkey: useFeeDiscountPubkey,
       selfTradeBehavior,
+      maxTs,
+      replaceIfExists,
     });
     transaction.add(placeOrderInstruction);
 
@@ -686,7 +801,9 @@ export class Market {
 
   makePlaceOrderInstruction<T extends PublicKey | Account>(
     connection: Connection,
-    {
+    params: OrderParams<T>,
+  ): TransactionInstruction {
+    const {
       owner,
       payer,
       side,
@@ -697,9 +814,7 @@ export class Market {
       openOrdersAddressKey,
       openOrdersAccount,
       feeDiscountPubkey = null,
-      selfTradeBehavior = 'decrementTake',
-    }: OrderParams<T>,
-  ): TransactionInstruction {
+    } = params;
     // @ts-ignore
     const ownerAddress: PublicKey = owner.publicKey ?? owner;
     if (this.baseSizeNumberToLots(size).lte(new BN(0))) {
@@ -707,9 +822,6 @@ export class Market {
     }
     if (this.priceNumberToLots(price).lte(new BN(0))) {
       throw new Error('invalid price');
-    }
-    if (!this.supportsSrmFeeDiscounts) {
-      feeDiscountPubkey = null;
     }
     if (this.usesRequestQueue) {
       return DexInstructions.newOrder({
@@ -728,35 +840,236 @@ export class Market {
         orderType,
         clientId,
         programId: this._programId,
-        feeDiscountPubkey,
+        // @ts-ignore
+        feeDiscountPubkey: this.supportsSrmFeeDiscounts
+          ? feeDiscountPubkey
+          : null,
       });
     } else {
-      return DexInstructions.newOrderV3({
-        market: this.address,
-        bids: this._decoded.bids,
-        asks: this._decoded.asks,
-        requestQueue: this._decoded.requestQueue,
-        eventQueue: this._decoded.eventQueue,
-        baseVault: this._decoded.baseVault,
-        quoteVault: this._decoded.quoteVault,
-        openOrders: openOrdersAccount
-          ? openOrdersAccount.publicKey
-          : openOrdersAddressKey,
-        owner: ownerAddress,
-        payer,
-        side,
-        limitPrice: this.priceNumberToLots(price),
-        maxBaseQuantity: this.baseSizeNumberToLots(size),
-        maxQuoteQuantity: new BN(this._decoded.quoteLotSize.toNumber()).mul(
-          this.baseSizeNumberToLots(size).mul(this.priceNumberToLots(price)),
-        ),
-        orderType,
-        clientId,
-        programId: this._programId,
-        selfTradeBehavior,
-        feeDiscountPubkey,
-      });
+      return this.makeNewOrderV3Instruction(params);
     }
+  }
+
+  makeNewOrderV3Instruction<T extends PublicKey | Account>(
+    params: OrderParams<T>,
+  ): TransactionInstruction {
+    const {
+      owner,
+      payer,
+      side,
+      price,
+      size,
+      orderType = 'limit',
+      clientId,
+      openOrdersAddressKey,
+      openOrdersAccount,
+      feeDiscountPubkey = null,
+      selfTradeBehavior = 'decrementTake',
+      programId,
+      maxTs,
+      replaceIfExists,
+    } = params;
+    // @ts-ignore
+    const ownerAddress: PublicKey = owner.publicKey ?? owner;
+    return DexInstructions.newOrderV3({
+      market: this.address,
+      bids: this._decoded.bids,
+      asks: this._decoded.asks,
+      requestQueue: this._decoded.requestQueue,
+      eventQueue: this._decoded.eventQueue,
+      baseVault: this._decoded.baseVault,
+      quoteVault: this._decoded.quoteVault,
+      openOrders: openOrdersAccount
+        ? openOrdersAccount.publicKey
+        : openOrdersAddressKey,
+      owner: ownerAddress,
+      payer,
+      side,
+      limitPrice: this.priceNumberToLots(price),
+      maxBaseQuantity: this.baseSizeNumberToLots(size),
+      maxQuoteQuantity: new BN(this._decoded.quoteLotSize.toNumber()).mul(
+        this.baseSizeNumberToLots(size).mul(this.priceNumberToLots(price)),
+      ),
+      orderType,
+      clientId,
+      programId: programId ?? this._programId,
+      selfTradeBehavior,
+      // @ts-ignore
+      feeDiscountPubkey: this.supportsSrmFeeDiscounts
+        ? feeDiscountPubkey
+        : null,
+      // @ts-ignore
+      maxTs,
+      replaceIfExists,
+    });
+  }
+
+  async makeSendTakeTransaction<T extends PublicKey | Account>(
+    connection: Connection,
+    {
+      owner,
+      baseWallet,
+      quoteWallet,
+      side,
+      price,
+      maxBaseSize,
+      maxQuoteSize,
+      minBaseSize,
+      minQuoteSize,
+      limit = 65535,
+      programId = undefined,
+      feeDiscountPubkey = undefined,
+    }: SendTakeParams<T>,
+    feeDiscountPubkeyCacheDurationMs = 0
+  ) {
+    // @ts-ignore
+    const ownerAddress: PublicKey = owner.publicKey ?? owner;
+    const transaction = new Transaction();
+    const signers: Account[] = [];
+
+    // @ts-ignore
+    const vaultSigner = await PublicKey.createProgramAddress(
+      [
+        this.address.toBuffer(),
+        this._decoded.vaultSignerNonce.toArrayLike(Buffer, 'le', 8),
+      ],
+      this._programId,
+    );
+
+    // Fetch an SRM fee discount key if the market supports discounts and it is not supplied
+    let useFeeDiscountPubkey: PublicKey | null;
+    if (feeDiscountPubkey) {
+      useFeeDiscountPubkey = feeDiscountPubkey;
+    } else if (
+      feeDiscountPubkey === undefined &&
+      this.supportsSrmFeeDiscounts
+    ) {
+      useFeeDiscountPubkey = (
+        await this.findBestFeeDiscountKey(
+          connection,
+          ownerAddress,
+          feeDiscountPubkeyCacheDurationMs,
+        )
+      ).pubkey;
+    } else {
+      useFeeDiscountPubkey = null;
+    }
+
+    const sendTakeInstruction = this.makeSendTakeInstruction({
+      owner,
+      baseWallet,
+      quoteWallet,
+      vaultSigner,
+      side,
+      price,
+      maxBaseSize,
+      maxQuoteSize,
+      minBaseSize,
+      minQuoteSize,
+      limit,
+      programId,
+      feeDiscountPubkey: useFeeDiscountPubkey,
+    });
+    transaction.add(sendTakeInstruction);
+
+    return { transaction, signers, payer: owner };
+  }
+
+  makeSendTakeInstruction<T extends PublicKey | Account>(
+    params: SendTakeParams<T>,
+  ): TransactionInstruction {
+    const {
+      owner,
+      baseWallet,
+      quoteWallet,
+      vaultSigner,
+      side,
+      price,
+      maxBaseSize,
+      maxQuoteSize,
+      minBaseSize,
+      minQuoteSize,
+      limit = 65535,
+      programId,
+      feeDiscountPubkey = null,
+    } = params;
+    // @ts-ignore
+    const ownerAddress: PublicKey = owner.publicKey ?? owner;
+
+    if (this.baseSizeNumberToLots(maxBaseSize).lte(new BN(0))) {
+      throw new Error('size too small');
+    }
+    if (this.quoteSizeNumberToSplSize(maxQuoteSize).lte(new BN(0))) {
+      throw new Error('size too small');
+    }
+    if (this.priceNumberToLots(price).lte(new BN(0))) {
+      throw new Error('invalid price');
+    }
+    return DexInstructions.sendTake({
+      market: this.address,
+      requestQueue: this._decoded.requestQueue,
+      eventQueue: this._decoded.eventQueue,
+      bids: this._decoded.bids,
+      asks: this._decoded.asks,
+      baseWallet,
+      quoteWallet,
+      owner: ownerAddress,
+      baseVault: this._decoded.baseVault,
+      quoteVault: this._decoded.quoteVault,
+      vaultSigner,
+      side,
+      limitPrice: this.priceNumberToLots(price),
+      maxBaseQuantity: this.baseSizeNumberToLots(maxBaseSize),
+      maxQuoteQuantity: this.quoteSizeNumberToSplSize(maxQuoteSize),
+      minBaseQuantity: this.baseSizeNumberToLots(minBaseSize),
+      minQuoteQuantity: this.quoteSizeNumberToSplSize(minQuoteSize),
+      limit,
+      programId: programId ? programId : this._programId,
+      // @ts-ignore
+      feeDiscountPubkey: this.supportsSrmFeeDiscounts
+        ? feeDiscountPubkey
+        : null,
+    });
+  }
+
+  makeReplaceOrdersByClientIdsInstruction<T extends PublicKey | Account>(
+    accounts: OrderParamsAccounts<T>, orders: OrderParamsBase<T>[],
+  ): TransactionInstruction {
+    // @ts-ignore
+    const ownerAddress: PublicKey = accounts.owner.publicKey ?? accounts.owner;
+    return DexInstructions.replaceOrdersByClientIds({
+      market: this.address,
+      bids: this._decoded.bids,
+      asks: this._decoded.asks,
+      requestQueue: this._decoded.requestQueue,
+      eventQueue: this._decoded.eventQueue,
+      baseVault: this._decoded.baseVault,
+      quoteVault: this._decoded.quoteVault,
+      openOrders: accounts.openOrdersAccount
+        ? accounts.openOrdersAccount.publicKey
+        : accounts.openOrdersAddressKey,
+      owner: ownerAddress,
+      payer: accounts.payer,
+      programId: accounts.programId ?? this._programId,
+      // @ts-ignore
+      feeDiscountPubkey: this.supportsSrmFeeDiscounts
+        ? accounts.feeDiscountPubkey
+        : null,
+      orders: orders.map(order => ({
+        side: order.side,
+        limitPrice: this.priceNumberToLots(order.price),
+        maxBaseQuantity: this.baseSizeNumberToLots(order.size),
+        maxQuoteQuantity: new BN(this._decoded.quoteLotSize.toNumber()).mul(
+          this.baseSizeNumberToLots(order.size).mul(this.priceNumberToLots(order.price)),
+        ),
+        orderType: order.orderType,
+        clientId: order.clientId,
+        programId: accounts.programId ?? this._programId,
+        selfTradeBehavior: order.selfTradeBehavior,
+        // @ts-ignore
+        maxTs: order.maxTs,
+      }))
+    });
   }
 
   private async _sendTransaction(
@@ -788,6 +1101,21 @@ export class Market {
       owner.publicKey,
       openOrders,
       clientId,
+    );
+    return await this._sendTransaction(connection, transaction, [owner]);
+  }
+
+  async cancelOrdersByClientIds(
+    connection: Connection,
+    owner: Account,
+    openOrders: PublicKey,
+    clientIds: BN[],
+  ) {
+    const transaction = await this.makeCancelOrdersByClientIdsTransaction(
+      connection,
+      owner.publicKey,
+      openOrders,
+      clientIds,
     );
     return await this._sendTransaction(connection, transaction, [owner]);
   }
@@ -824,6 +1152,28 @@ export class Market {
         }),
       );
     }
+    return transaction;
+  }
+
+  async makeCancelOrdersByClientIdsTransaction(
+    connection: Connection,
+    owner: PublicKey,
+    openOrders: PublicKey,
+    clientIds: BN[],
+  ) {
+    const transaction = new Transaction();
+    transaction.add(
+      DexInstructions.cancelOrdersByClientIds({
+        market: this.address,
+        openOrders,
+        owner,
+        bids: this._decoded.bids,
+        asks: this._decoded.asks,
+        eventQueue: this._decoded.eventQueue,
+        clientIds,
+        programId: this._programId,
+      }),
+    );
     return transaction;
   }
 
@@ -876,6 +1226,35 @@ export class Market {
         programId: this._programId,
       });
     }
+  }
+
+  public makeConsumeEventsInstruction(
+    openOrdersAccounts: Array<PublicKey>,
+    limit: number,
+  ): TransactionInstruction {
+    return DexInstructions.consumeEvents({
+      market: this.address,
+      eventQueue: this._decoded.eventQueue,
+      coinFee: this._decoded.eventQueue,
+      pcFee: this._decoded.eventQueue,
+      openOrdersAccounts,
+      limit,
+      programId: this._programId,
+    });
+  }
+
+  public makeConsumeEventsPermissionedInstruction(
+    openOrdersAccounts: Array<PublicKey>,
+    limit: number,
+  ): TransactionInstruction {
+    return DexInstructions.consumeEventsPermissioned({
+      market: this.address,
+      eventQueue: this._decoded.eventQueue,
+      crankAuthority: this._decoded.consumeEventsAuthority,
+      openOrdersAccounts,
+      limit,
+      programId: this._programId,
+    });
   }
 
   async settleFunds(
@@ -968,6 +1347,7 @@ export class Market {
             : quoteWallet,
         vaultSigner,
         programId: this._programId,
+        // @ts-ignore
         referrerQuoteWallet,
       }),
     );
@@ -1096,8 +1476,8 @@ export class Market {
         (price *
           Math.pow(10, this._quoteSplTokenDecimals) *
           this._decoded.baseLotSize.toNumber()) /
-          (Math.pow(10, this._baseSplTokenDecimals) *
-            this._decoded.quoteLotSize.toNumber()),
+        (Math.pow(10, this._baseSplTokenDecimals) *
+          this._decoded.quoteLotSize.toNumber()),
       ),
     );
   }
@@ -1108,6 +1488,14 @@ export class Market {
 
   quoteSplSizeToNumber(size: BN) {
     return divideBnToNumber(size, this._quoteSplTokenMultiplier);
+  }
+
+  baseSizeNumberToSplSize(size: number) {
+    return new BN(Math.round(size * Math.pow(10, this._baseSplTokenDecimals)),);
+  }
+
+  quoteSizeNumberToSplSize(size: number) {
+    return new BN(Math.round(size * Math.pow(10, this._quoteSplTokenDecimals)),);
   }
 
   baseSizeLotsToNumber(size: BN) {
@@ -1136,7 +1524,7 @@ export class Market {
     const native = new BN(
       Math.round(size * Math.pow(10, this._quoteSplTokenDecimals)),
     );
-    // rounds down to the nearest lot size
+    // roudns down to the nearest lot size
     return native.div(this._decoded.quoteLotSize);
   }
 
@@ -1154,23 +1542,53 @@ export interface MarketOptions {
   commitment?: Commitment;
 }
 
-export interface OrderParams<T = Account> {
-  owner: T;
-  payer: PublicKey;
+export interface OrderParamsBase<T = Account> {
   side: 'buy' | 'sell';
   price: number;
   size: number;
   orderType?: 'limit' | 'ioc' | 'postOnly';
   clientId?: BN;
+  selfTradeBehavior?:
+  | 'decrementTake'
+  | 'cancelProvide'
+  | 'abortTransaction'
+  | undefined;
+  maxTs?: number | null;
+}
+
+export interface OrderParamsAccounts<T = Account> {
+  owner: T;
+  payer: PublicKey;
   openOrdersAddressKey?: PublicKey;
   openOrdersAccount?: Account;
   feeDiscountPubkey?: PublicKey | null;
-  selfTradeBehavior?:
-    | 'decrementTake'
-    | 'cancelProvide'
-    | 'abortTransaction'
-    | undefined;
+  programId?: PublicKey;
 }
+
+export interface OrderParams<T = Account> extends OrderParamsBase<T>, OrderParamsAccounts<T> {
+  replaceIfExists?: boolean;
+}
+
+export interface SendTakeParamsBase<T = Account> {
+  side: 'buy' | 'sell';
+  price: number;
+  maxBaseSize: number;
+  maxQuoteSize: number;
+  minBaseSize: number;
+  minQuoteSize: number;
+  limit?: number;
+}
+
+export interface SendTakeParamsAccounts<T = Account> {
+  owner: T;
+  baseWallet: PublicKey;
+  quoteWallet: PublicKey;
+  vaultSigner?: PublicKey;
+  feeDiscountPubkey?: PublicKey | null;
+  programId?: PublicKey;
+}
+
+export interface SendTakeParams<T = Account> extends SendTakeParamsBase<T>, SendTakeParamsAccounts<T> { }
 
 export const _OPEN_ORDERS_LAYOUT_V1 = struct([
   blob(5),
@@ -1231,6 +1649,9 @@ export class OpenOrders {
   baseTokenTotal!: BN;
   quoteTokenFree!: BN;
   quoteTokenTotal!: BN;
+
+  freeSlotBits!: BN;
+  isBidBits!: BN;
 
   orders!: BN[];
   clientIds!: BN[];
@@ -1394,7 +1815,7 @@ export class Orderbook {
     for (const { key, quantity } of this.slab.items(descending)) {
       const price = getPriceFromKey(key);
       if (levels.length > 0 && levels[levels.length - 1][0].eq(price)) {
-        levels[levels.length - 1][1].iadd(quantity);
+        levels[levels.length - 1][1] = levels[levels.length - 1][1].add(quantity);
       } else if (levels.length === depth) {
         break;
       } else {

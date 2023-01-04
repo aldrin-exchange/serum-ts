@@ -134,5 +134,53 @@
   {
     "address": "4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R",
     "name": "RAY"
+  },
+  {
+    "address": "3K6rftdAaQYMPunrtNRHgnK2UAtjm2JwyT2oCiTDouYE",
+    "name": "xCOPE"
+  },
+  {
+    "address": "dK83wTVypEpa1pqiBbHY3MNuUnT3ADUZM4wk9VZXZEc",
+    "name": "AAVE"
+  },
+  {
+    "address": "DgHK9mfhMtUwwv54GChRrU54T2Em5cuszq2uMuen1ZVE",
+    "name": "CEL"
+  },
+  {
+    "address": "7ncCLJpP3MNww17LW8bRvx8odQQnubNtfNZBL5BgAEHW",
+    "name": "RSR"
+  },
+  {
+    "address": "6ry4WBDvAwAnrYJVv6MCog4J8zx6S3cPgSqnTsDZ73AR",
+    "name": "TRYB"
+  },
+  {
+    "address": "8HGyAAB1yoM1ttS7pXjHMa3dukTFGQggnFFH3hJZgzQh",
+    "name": "COPE"
+  },
+  {
+    "address": "MERt85fc5boKw3BW1eYdxonEuJNvXbiMbs6hvheau5K",
+    "name": "MER"
+  },
+  {
+    "address": "4dmKkXNHdgYsXqBHCuMikNQWwVomZURhYvkkX5c4pQ7y",
+    "name": "SNY"
+  },
+  {
+    "address": "SLRSSpSLUTP7okbCUBYStWCo1vUgyt775faPqz8HUMr",
+    "name": "SLRS"
+  },
+  {
+    "address": "CDJWUqTcYTVAKXAVXoQZFes5JUFc7owSeq7eMQcDSbo5",
+    "name": "renBTC"
+  },
+  {
+    "address": "ArUkYE2XDKzqy77PRRGjo4wREWwqk6RXTfM9NeqzPvjU",
+    "name": "renDOGE"
+  },
+  {
+    "address": "GsNzxJfFn6zQdJGeYsupJWzUAm57Ba7335mfhWvFiE9Z",
+    "name": "DXL"
   }
 ]
