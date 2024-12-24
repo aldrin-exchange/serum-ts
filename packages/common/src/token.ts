@@ -1,7 +1,6 @@
-import { Connection, PublicKey } from '@solana/web3.js';
+import { Connection, PublicKey, GetProgramAccountsFilter } from '@solana/web3.js';
 import { ProgramAccount } from './';
-import { AccountInfo as TokenAccount } from '@solana/spl-token';
-import { TokenInstructions } from '@project-serum/serum';
+import { AccountInfo as TokenAccount, TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import * as bs58 from 'bs58';
 import * as BufferLayout from 'buffer-layout';
 
@@ -12,7 +11,7 @@ export async function getOwnedTokenAccounts(
   let filters = getOwnedAccountsFilters(publicKey);
   // @ts-ignore
   let resp = await connection._rpcRequest('getProgramAccounts', [
-    TokenInstructions.TOKEN_PROGRAM_ID.toBase58(),
+    TOKEN_PROGRAM_ID.toBase58(),
     {
       commitment: connection.commitment,
       filters,
@@ -69,12 +68,10 @@ export function parseMintData(data) {
   return { decimals };
 }
 
-// @ts-ignore
-export function getOwnedAccountsFilters(publicKey: PublicKey) {
+export function getOwnedAccountsFilters(publicKey: PublicKey): GetProgramAccountsFilter[] {
   return [
     {
       memcmp: {
-        // @ts-ignore
         offset: ACCOUNT_LAYOUT.offsetOf('owner'),
         bytes: publicKey.toBase58(),
       },
