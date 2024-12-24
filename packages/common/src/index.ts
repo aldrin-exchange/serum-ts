@@ -4,6 +4,7 @@ import {
   PublicKey,
   Transaction,
   TransactionInstruction,
+  GetProgramAccountsFilter,
 } from '@solana/web3.js';
 import { Provider } from './provider';
 import {
@@ -12,8 +13,8 @@ import {
   AccountInfo,
   AccountLayout,
   u64,
+  TOKEN_PROGRAM_ID,
 } from '@solana/spl-token';
-import { TokenInstructions } from '@project-serum/serum';
 import BN from 'bn.js';
 
 export * from './provider';
@@ -55,21 +56,23 @@ export async function createMintInstructions(
   mint: PublicKey,
   decimals?: number,
 ): Promise<TransactionInstruction[]> {
-  let instructions = [
+  return [
     SystemProgram.createAccount({
       fromPubkey: provider.wallet.publicKey,
       newAccountPubkey: mint,
       space: 82,
       lamports: await provider.connection.getMinimumBalanceForRentExemption(82),
-      programId: TokenInstructions.TOKEN_PROGRAM_ID,
+      programId: TOKEN_PROGRAM_ID,
     }),
-    TokenInstructions.initializeMint({
-      mint,
-      decimals: decimals ?? 0,
-      mintAuthority: authority,
-    }),
+    {
+      programId: TOKEN_PROGRAM_ID,
+      keys: [
+        { pubkey: mint, isSigner: false, isWritable: true },
+        { pubkey: authority, isSigner: false, isWritable: false },
+      ],
+      data: Buffer.from([0, decimals ?? 0]),
+    },
   ];
-  return instructions;
 }
 
 export async function createMintAndVault(
@@ -90,13 +93,16 @@ export async function createMintAndVault(
       newAccountPubkey: mint.publicKey,
       space: 82,
       lamports: await provider.connection.getMinimumBalanceForRentExemption(82),
-      programId: TokenInstructions.TOKEN_PROGRAM_ID,
+      programId: TOKEN_PROGRAM_ID,
     }),
-    TokenInstructions.initializeMint({
-      mint: mint.publicKey,
-      decimals: decimals ?? 0,
-      mintAuthority: provider.wallet.publicKey,
-    }),
+    {
+      programId: TOKEN_PROGRAM_ID,
+      keys: [
+        { pubkey: mint.publicKey, isSigner: false, isWritable: true },
+        { pubkey: provider.wallet.publicKey, isSigner: false, isWritable: false },
+      ],
+      data: Buffer.from([0, decimals ?? 0]),
+    },
     SystemProgram.createAccount({
       fromPubkey: provider.wallet.publicKey,
       newAccountPubkey: vault.publicKey,
@@ -104,19 +110,26 @@ export async function createMintAndVault(
       lamports: await provider.connection.getMinimumBalanceForRentExemption(
         165,
       ),
-      programId: TokenInstructions.TOKEN_PROGRAM_ID,
+      programId: TOKEN_PROGRAM_ID,
     }),
-    TokenInstructions.initializeAccount({
-      account: vault.publicKey,
-      mint: mint.publicKey,
-      owner,
-    }),
-    TokenInstructions.mintTo({
-      mint: mint.publicKey,
-      destination: vault.publicKey,
-      amount,
-      mintAuthority: provider.wallet.publicKey,
-    }),
+    {
+      programId: TOKEN_PROGRAM_ID,
+      keys: [
+        { pubkey: vault.publicKey, isSigner: false, isWritable: true },
+        { pubkey: mint.publicKey, isSigner: false, isWritable: false },
+        { pubkey: owner, isSigner: false, isWritable: false },
+      ],
+      data: Buffer.from([1]),
+    },
+    {
+      programId: TOKEN_PROGRAM_ID,
+      keys: [
+        { pubkey: mint.publicKey, isSigner: false, isWritable: true },
+        { pubkey: vault.publicKey, isSigner: false, isWritable: true },
+        { pubkey: provider.wallet.publicKey, isSigner: true, isWritable: false },
+      ],
+      data: Buffer.from([7, ...amount.toArray('le', 8)]),
+    },
   );
   await provider.send(tx, [mint, vault]);
   return [mint.publicKey, vault.publicKey];
@@ -152,13 +165,17 @@ export async function createTokenAccountInstrs(
       newAccountPubkey,
       space: 165,
       lamports,
-      programId: TokenInstructions.TOKEN_PROGRAM_ID,
+      programId: TOKEN_PROGRAM_ID,
     }),
-    TokenInstructions.initializeAccount({
-      account: newAccountPubkey,
-      mint,
-      owner,
-    }),
+    {
+      programId: TOKEN_PROGRAM_ID,
+      keys: [
+        { pubkey: newAccountPubkey, isSigner: false, isWritable: true },
+        { pubkey: mint, isSigner: false, isWritable: false },
+        { pubkey: owner, isSigner: false, isWritable: false },
+      ],
+      data: Buffer.from([1]),
+    },
   ];
 }
 
@@ -222,7 +239,6 @@ export function parseTokenAccount(data: Buffer): AccountInfo {
 
   if (accountInfo.delegateOption === 0) {
     accountInfo.delegate = null;
-    // eslint-disable-next-line new-cap
     accountInfo.delegatedAmount = new u64(0);
   } else {
     accountInfo.delegate = new PublicKey(accountInfo.delegate);
